@@ -389,7 +389,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             try:
                 doc_dir = "/app/docs"  # Docker path
                 print("[MCP] Starting full scan with database reset")
-                scan_all_my_documents(doc_dir, reset_database=True)
+                scan_all_my_documents(doc_dir)
                 return [TextContent(
                     type="text",
                     text="✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)"
@@ -415,7 +415,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         else:
                             # Do a full scan with database reset to prevent duplicates
                             print(f"[MCP] Performing full document scan (resetting database)")
-                            scan_all_my_documents(doc_dir, reset_database=True)
+                            scan_all_my_documents(doc_dir)
                     except Exception as e:
                         print(f"[MCP] Error during scan: {e}")
                         import traceback
