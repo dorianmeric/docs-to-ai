@@ -1,6 +1,6 @@
 # Multi-stage build for docs-to-ai MCP server
 # Stage 1: Build stage
-FROM python:3.13-slim as builder
+FROM python:3.13-slim AS builder
 
 # Install system dependencies for building Python packages
 RUN apt-get update && apt-get install -y build-essential  && rm -rf /var/lib/apt/lists/*

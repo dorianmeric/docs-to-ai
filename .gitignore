@@ -37,12 +37,8 @@ ENV/
 *.swp
 *.swo
 
-# ChromaDB
-chroma_db/
-
-# PDF cache
-pdf_cache/
-doc_cache/
+# ChromaDB & doc cache
+cache/
 
 # Logs
 *.log

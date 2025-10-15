@@ -232,7 +232,7 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
                       Signature: callback(changes: List[Tuple[str, str]], incremental: bool)
                       - changes: List of (action, filepath) tuples
                       - incremental: True for incremental update, False for full scan
-        folder_path: Path to watch (defaults to app/my-docs)
+        folder_path: Path to watch (defaults to /my-docs)
         debounce_seconds: Minimum seconds between triggers (default: 10)
         do_initial_scan: Whether to perform initial full scan on startup
     
@@ -472,7 +472,7 @@ def _get_watch_path(folder_path: Optional[str] = None) -> Path:
         return Path(folder_path)
     
     # Default to app/my-docs relative to BASE_DIR
-    return BASE_DIR / "app" / "my-docs"
+    return BASE_DIR / "my-docs"
 
 
 # Standalone script support (for backward compatibility)

@@ -53,7 +53,7 @@ pdfs/
 
 ```bash
 pip install -r requirements.txt  # Install dependencies:
-python -m app.scan_all_my_documentss --doc-dir ./my-docs #  Ingest PDFs
+python -m app.scan_all_my_documents  #  Ingest PDFs
 python mcp_server.py #  Start the MCP Server
 ```
 

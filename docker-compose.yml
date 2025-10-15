@@ -11,11 +11,11 @@ services:
     # Volumes for persistent data
     volumes:
       # ChromaDB database (persists the vector store)
-      - ./chroma_db:/app/chroma_db
+      - ./cache/chromadb:/app/chroma_db
       # Document cache (persists extracted text)
-      - ./doc_cache:/app/doc_cache
+      - ./cache/doc_cache:/app/doc_cache
       # Documents directory (your PDFs and Word docs)
-      - ./my-docs:/app/docs:ro  # Read-only to prevent accidental modifications
+      - ./my-docs:/my-docs:ro  # Read-only to prevent accidental modifications
     
     # Environment variables (optional)
     environment:

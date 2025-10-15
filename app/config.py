@@ -2,8 +2,14 @@ from pathlib import Path
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent
-CHROMA_DB_DIR = BASE_DIR / "chroma_db"
-DOC_CACHE_DIR = BASE_DIR / "doc_cache"
+CHROMA_DB_DIR = BASE_DIR / "cache/chromadb"
+DOC_CACHE_DIR = BASE_DIR / "cache/doc_cache"
+DOCS_DIR = BASE_DIR / "my-docs" # Default documents directory
+
+CHROMA_DB_DIR.mkdir(exist_ok=True, parents=True)
+DOC_CACHE_DIR.mkdir(exist_ok=True, parents=True)
+DOCS_DIR.mkdir(exist_ok=True, parents=True)
+
 
 # Embedding Configuration
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # sentence-transformers model
@@ -14,7 +20,7 @@ CHUNK_SIZE = 1000  # Characters per chunk
 CHUNK_OVERLAP = 200  # Overlap between chunks
 
 # Search Configuration
-DEFAULT_SEARCH_RESULTS = 5
+DEFAULT_SEARCH_RESULTS = 10
 MAX_SEARCH_RESULTS = 20
 
 # Topic/Folder Configuration
@@ -27,8 +33,4 @@ SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.xlsx', '.xls', '.xlsam
 
 # ChromaDB Configuration
 CHROMA_COLLECTION_NAME = "my-documents" # you can rename this collection
-
-# Create necessary directories
-CHROMA_DB_DIR.mkdir(exist_ok=True)
-DOC_CACHE_DIR.mkdir(exist_ok=True)
 

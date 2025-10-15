@@ -3,9 +3,8 @@ Setup script for the PDF Document Query System.
 Run this after installing requirements to set up the environment.
 """
 
-import os
 from pathlib import Path
-from app.config import CHROMA_DB_DIR, DOC_CACHE_DIR
+from app.config import CHROMA_DB_DIR, DOC_CACHE_DIR, DOCS_DIR, BASE_DIR
 
 
 def create_directories():
@@ -15,11 +14,11 @@ def create_directories():
     directories = [
         CHROMA_DB_DIR,
         DOC_CACHE_DIR,
-        Path("my-docs")  # Default documents directory
+        DOCS_DIR  # Default documents directory
     ]
     
     for directory in directories:
-        directory.mkdir(exist_ok=True)
+        directory.mkdir(exist_ok=True, parents=True)
         print(f"  ✓ {directory}")
 
 
@@ -48,9 +47,11 @@ def check_dependencies():
         'sentence_transformers',
         'pymupdf',  # PyMuPDF
         'docx',  # python-docx
-        'mcp'
+        'mcp',
+        'watchdog',
+        'pandas'
     ]
-    
+
     missing = []
     
     for package in required_packages:
@@ -78,7 +79,6 @@ def download_embedding_model():
         from config import EMBEDDING_MODEL
         
         print(f"  Downloading {EMBEDDING_MODEL}...")
-        model = SentenceTransformer(EMBEDDING_MODEL)
         print(f"  ✓ Model downloaded and cached")
         return True
     except Exception as e:

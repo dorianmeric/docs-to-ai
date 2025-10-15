@@ -64,7 +64,7 @@ if ($containerRunning) {
 
 # Check data directories
 Write-Host "`n[6/5] Checking data directories..." -ForegroundColor Yellow
-$dirs = @("chroma_db", "doc_cache", "docs")
+$dirs = @("cache/dchroma_db", "cache/doc_cache", "my-docs")
 foreach ($dir in $dirs) {
     if (Test-Path "./$dir") {
         $itemCount = (Get-ChildItem -Path "./$dir" -Recurse -File | Measure-Object).Count
