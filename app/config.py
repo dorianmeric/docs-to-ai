@@ -1,8 +1,7 @@
-import os
 from pathlib import Path
 
 # Paths
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 CHROMA_DB_DIR = BASE_DIR / "chroma_db"
 DOC_CACHE_DIR = BASE_DIR / "doc_cache"
 

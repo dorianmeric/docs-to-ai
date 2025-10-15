@@ -5,7 +5,7 @@ Run this after installing requirements to set up the environment.
 
 import os
 from pathlib import Path
-from config import CHROMA_DB_DIR, DOC_CACHE_DIR
+from app.config import CHROMA_DB_DIR, DOC_CACHE_DIR
 
 
 def create_directories():

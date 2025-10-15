@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: docs-to-ai-mcp
-    image: docs-to-ai:latest
+    image: mcp/docs-to-ai
     
     # Volumes for persistent data
     volumes:
@@ -48,7 +48,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: docs-to-ai-addfiles
-    image: docs-to-ai:latest
+    image: mcp/docs-to-ai
     
     volumes:
       - ./chroma_db:/app/chroma_db

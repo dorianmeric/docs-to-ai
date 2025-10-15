@@ -7,7 +7,9 @@ information from a collection of documents stored in a vector database.
 """
 
 import asyncio
+import subprocess
 from typing import Optional
+import time
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from app.vector_store import VectorStore
@@ -89,6 +91,17 @@ async def list_tools() -> list[Tool]:
                 "Get statistics about the document collection, including total number "
                 "of documents, topics, file types, and chunks stored in the vector database. "
                 "Shows the distribution of documents across topics and file types."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        Tool(
+            name="scan_my_documents",
+            description=(
+                "Scan all documents in the docs directory and update the vector database. "
+                "This forces a re-indexing of all documents using the latest files."
             ),
             inputSchema={
                 "type": "object",
@@ -216,7 +229,25 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         topics = [topics]
                     topics_display = TOPIC_SEPARATOR.join(topics)
                     filetype = doc.get('filetype', '.pdf')
-                    response_parts.append(f"  • {doc['filename']} ({filetype}) - {topics_display}")
+                    
+                    # Format file size
+                    file_size = doc.get('file_size', 0)
+                    if file_size > 1024 * 1024:
+                        size_str = f"{file_size / (1024*1024):.1f} MB"
+                    elif file_size > 1024:
+                        size_str = f"{file_size / 1024:.1f} KB"
+                    else:
+                        size_str = f"{file_size} bytes"
+                    
+                    # Format last modified date
+                    last_modified = doc.get('last_modified', 0)
+                    if last_modified:
+                        mod_time = time.ctime(last_modified)
+                    else:
+                        mod_time = "Unknown"
+                    
+                    response_parts.append(f"  • {doc['filename']} ({filetype}) - Size: {size_str}, Modified: {mod_time}")
+                    response_parts.append(f"    Topics: {topics_display}")
             
             return [TextContent(
                 type="text",
@@ -270,10 +301,69 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     count = stats['documents_per_topic'].get(topic, 0)
                     response += f"  📁 {topic}: {count} document{'s' if count != 1 else ''}\n"
             
+            # Add file size information
+            if stats['documents']:
+                response += "\nFile Size Information:\n"
+                total_size = sum(doc.get('file_size', 0) for doc in stats['documents'])
+                
+                if total_size > 1024 * 1024:
+                    size_str = f"{total_size / (1024*1024):.1f} MB"
+                elif total_size > 1024:
+                    size_str = f"{total_size / 1024:.1f} KB"
+                else:
+                    size_str = f"{total_size} bytes"
+                
+                response += f"  Total size of all documents: {size_str}\n"
+                
+                # Show largest documents
+                sorted_docs = sorted(stats['documents'], key=lambda x: x.get('file_size', 0), reverse=True)
+                response += "\nLargest documents:\n"
+                for doc in sorted_docs[:5]:
+                    file_size = doc.get('file_size', 0)
+                    if file_size > 1024 * 1024:
+                        size_str = f"{file_size / (1024*1024):.1f} MB"
+                    elif file_size > 1024:
+                        size_str = f"{file_size / 1024:.1f} KB"
+                    else:
+                        size_str = f"{file_size} bytes"
+                    
+                    # Format last modified date
+                    last_modified = doc.get('last_modified', 0)
+                    if last_modified:
+                        mod_time = time.ctime(last_modified)
+                    else:
+                        mod_time = "Unknown"
+                    
+                    response += f"  {doc['filename']}: {size_str}, Modified: {mod_time}\n"
+            
             return [TextContent(
                 type="text",
                 text=response
             )]
+        
+        elif name == "scan_my_documents":
+            # Run the command to scan and update documents
+            try:
+                result = subprocess.run(
+                    ["python", "app/add_docs_to_database.py", "--doc-dir", "/app/docs"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                return [TextContent(
+                    type="text",
+                    text=f"Successfully scanned and updated documents.\n\nOutput:\n{result.stdout}"
+                )]
+            except subprocess.CalledProcessError as e:
+                return [TextContent(
+                    type="text",
+                    text=f"Error scanning documents: {e}\nError output: {e.stderr}"
+                )]
+            except Exception as e:
+                return [TextContent(
+                    type="text",
+                    text=f"Unexpected error scanning documents: {str(e)}"
+                )]
         
         else:
             return [TextContent(
@@ -299,6 +389,9 @@ async def main():
             app.create_initialization_options()
         )
 
+    print("mcp_server.py -- MCP server is shutting down.")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
+

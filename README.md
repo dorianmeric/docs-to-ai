@@ -114,10 +114,16 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
+
     "docs-to-ai": {
-      "command": "python",
-      "args": ["C:/[UPDATE_PATH_TO_DOCS-TO-AI]/docs-to-ai/mcp_server.py"]
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "mcp/docs-to-ai"
+      ]
     }
+
   }
 }
 ```

@@ -3,9 +3,7 @@
 FROM python:3.13-slim as builder
 
 # Install system dependencies for building Python packages
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y build-essential  && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -20,9 +18,7 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 FROM python:3.13-slim
 
 # Install runtime dependencies (needed for PyMuPDF)
-RUN apt-get update && apt-get install -y \
-    libmupdf-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libmupdf-dev  && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser
@@ -35,12 +31,12 @@ COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code
 COPY --chown=appuser:appuser *.py ./
+COPY --chown=appuser:appuser app/*.py ./app/
 COPY --chown=appuser:appuser LICENSE ./
 COPY --chown=appuser:appuser README.md ./
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/chroma_db /app/doc_cache /app/docs && \
-    chown -R appuser:appuser /app
+RUN mkdir -p /app/chroma_db /app/doc_cache /app/docs && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
@@ -53,8 +49,7 @@ ENV PYTHONUNBUFFERED=1
 # EXPOSE 8000
 
 # Health check (optional - checks if Python imports work)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import mcp, chromadb, sentence_transformers" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD python -c "import mcp, chromadb, sentence_transformers" || exit 1
 
 # Default command: run the MCP server
 CMD ["python", "mcp_server.py"]

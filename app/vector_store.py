@@ -3,7 +3,7 @@ from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Optional
 import json
-from config import (
+from app.config import (
     CHROMA_DB_DIR, 
     CHROMA_COLLECTION_NAME, 
     EMBEDDING_MODEL,
@@ -174,7 +174,9 @@ class VectorStore:
                         'filename': metadata.get('filename', 'Unknown'),
                         'topics': topics,
                         'filepath': filepath,
-                        'filetype': metadata.get('filetype', '.pdf')
+                        'filetype': metadata.get('filetype', '.pdf'),
+                        'file_size': metadata.get('file_size', 0),
+                        'last_modified': metadata.get('last_modified', 0)
                     }
         
         # Sort by first topic, then filename
@@ -318,3 +320,4 @@ if __name__ == "__main__":
     if stats['total_chunks'] > 0:
         results = store.search("test query", n_results=3)
         print(f"\nTest search returned {len(results)} results")
+

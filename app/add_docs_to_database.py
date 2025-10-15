@@ -1,8 +1,8 @@
 import argparse
 from pathlib import Path
-from document_processor import DocumentProcessor
-from vector_store import VectorStore
-from config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR
+from app.document_processor import DocumentProcessor
+from app.vector_store import VectorStore
+from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR
 import sys
 
 

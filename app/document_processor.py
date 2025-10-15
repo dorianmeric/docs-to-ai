@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 import hashlib
 import json
 from docx import Document as DocxDocument
-from config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC
+from app.config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC
 
 
 class DocumentProcessor:
@@ -146,6 +146,10 @@ class DocumentProcessor:
         # Extract topics from folder hierarchy
         topics = self.extract_topics_from_path(doc_path, base_path)
         
+        # Get file metadata
+        file_size = doc_path.stat().st_size
+        last_modified = doc_path.stat().st_mtime
+        
         # Check cache
         cache_file = self._get_cache_path(doc_path)
         if cache_file.exists():
@@ -153,6 +157,8 @@ class DocumentProcessor:
             # Update topics in cached data in case folder structure changed
             for page_data in cached_data:
                 page_data['metadata']['topics'] = topics
+                page_data['metadata']['file_size'] = file_size
+                page_data['metadata']['last_modified'] = last_modified
             return cached_data
         
         # Determine file type and extract text
@@ -177,6 +183,8 @@ class DocumentProcessor:
                     'filepath': str(doc_path),
                     'topics': topics,
                     'filetype': extension,
+                    'file_size': file_size,
+                    'last_modified': last_modified,
                     'total_pages': page_data['total_pages']
                 }
             })
@@ -271,8 +279,9 @@ if __name__ == "__main__":
         chunks = processor.process_document(test_doc)
         print(f"Extracted {len(chunks)} chunks from {test_doc}")
         if chunks:
-            print(f"\\nFirst chunk preview:")
+            print(f"\nFirst chunk preview:")
             print(f"Topics: {chunks[0]['metadata']['topics']}")
             print(chunks[0]['text'][:200])
     else:
         print(f"Test file {test_doc} not found")
+
