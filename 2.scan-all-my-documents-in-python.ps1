@@ -1,0 +1,1 @@
+python -m app.scan_all_my_documents --doc-dir ./my-docs

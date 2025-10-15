@@ -53,7 +53,7 @@ pdfs/
 
 ```bash
 pip install -r requirements.txt  # Install dependencies:
-python -m app.add_docs_to_database --doc-dir ./my-docs #  Ingest PDFs
+python -m app.scan_all_my_documentss --doc-dir ./my-docs #  Ingest PDFs
 python mcp_server.py #  Start the MCP Server
 ```
 
@@ -133,7 +133,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 - `mcp_server.py` - Main MCP server implementation
 - `pdf_processor.py` - PDF text extraction and chunking
 - `vector_store.py` - Vector database operations
-- `add_docs_to_database.py` - Batch PDF ingestion script
+- `scan_all_my_documentss.py` - Batch PDF ingestion script
 - `requirements.txt` - Python dependencies
 - `config.py` - Configuration settings
 

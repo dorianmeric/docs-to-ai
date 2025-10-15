@@ -100,7 +100,7 @@ def print_next_steps():
     print("     → Topics: ['Project_Name', 'Legal_Docs']")
     
     print("\n2. Ingest your documents:")
-    print("   python -m app.add_docs_to_database --doc-dir ./my-docs")
+    print("   python -m app.scan_all_my_documents --doc-dir ./my-docs")
     
     print("\n3. Test the system:")
     print("   python test_system.py")

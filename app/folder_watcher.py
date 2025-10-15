@@ -492,7 +492,7 @@ if __name__ == "__main__":
         # Trigger full scan script (for backward compatibility)
         try:
             result = subprocess.run(
-                ["python", "-m", "app.add_docs_to_database", "--doc-dir", "/app/docs"],
+                ["python", "-m", "app.scan_all_my_documents", "--doc-dir", "/app/docs"],
                 capture_output=True,
                 text=True,
                 check=True,

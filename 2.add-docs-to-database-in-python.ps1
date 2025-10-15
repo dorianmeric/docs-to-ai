@@ -1,1 +1,0 @@
-python -m app.add_docs_to_database --doc-dir ./my-docs

@@ -21,7 +21,7 @@ from app.folder_watcher import (
     trigger_full_scan_if_needed
 )
 from app.incremental_updater import process_incremental_changes
-from app.add_docs_to_database import add_docs_to_database
+from app.scan_all_my_documents import scan_all_my_documents
 
 # Initialize server
 app = Server("docs-to-ai")
@@ -244,7 +244,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 filter_msg = f" with topic '{topic_filter}'" if topic_filter else ""
                 return [TextContent(
                     type="text",
-                    text=f"No documents found{filter_msg}. Use 'python -m app.add_docs_to_database' to add documents."
+                    text=f"No documents found{filter_msg}. Use 'python -m app.scan_all_my_documents' to add documents."
                 )]
             
             # Group by first topic for display
@@ -303,7 +303,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if not topics:
                 return [TextContent(
                     type="text",
-                    text="No topics found. Use add_docs_to_database.py to add documents."
+                    text="No topics found. Use scan_all_my_documents.py to add documents."
                 )]
             
             stats = vector_store.get_stats()
@@ -389,7 +389,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             try:
                 doc_dir = "/app/docs"  # Docker path
                 print("[MCP] Starting full scan with database reset")
-                add_docs_to_database(doc_dir, reset_database=True)
+                scan_all_my_documents(doc_dir, reset_database=True)
                 return [TextContent(
                     type="text",
                     text="✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)"
@@ -415,7 +415,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         else:
                             # Do a full scan with database reset to prevent duplicates
                             print(f"[MCP] Performing full document scan (resetting database)")
-                            add_docs_to_database(doc_dir, reset_database=True)
+                            scan_all_my_documents(doc_dir, reset_database=True)
                     except Exception as e:
                         print(f"[MCP] Error during scan: {e}")
                         import traceback
@@ -550,3 +550,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

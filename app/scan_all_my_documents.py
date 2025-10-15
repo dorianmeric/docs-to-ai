@@ -6,7 +6,7 @@ from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC
 import sys
 
 
-def add_docs_to_database(doc_dir: str, reset_database: bool = True):
+def scan_all_my_documents(doc_dir: str, reset_database: bool = True):
     """
     Ingest all documents (PDFs, Word, Markdown, Excel) from a directory into the vector store.
     Uses folder structure to tag documents with hierarchical topics.
@@ -171,7 +171,7 @@ def main():
         store.reset()
     
     # Ingest documents
-    add_docs_to_database(args.doc_dir)
+    scan_all_my_documents(args.doc_dir)
 
 
 if __name__ == "__main__":
