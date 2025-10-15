@@ -4,6 +4,9 @@ from typing import List, Dict, Optional
 import hashlib
 import json
 from docx import Document as DocxDocument
+import markdown
+from markdown.extensions import Extension
+from markdown.preprocessors import Preprocessor
 from app.config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC
 
 
@@ -129,9 +132,62 @@ class DocumentProcessor:
         
         return pages_data
     
+    def extract_text_from_markdown(self, md_path: Path) -> List[Dict[str, any]]:
+        """
+        Extract text from markdown file.
+        
+        Args:
+            md_path: Path to the markdown file
+            
+        Returns:
+            List of dicts with 'page' and 'text'
+        """
+        pages_data = []
+        
+        try:
+            # Read the markdown file
+            with open(md_path, 'r', encoding='utf-8') as f:
+                markdown_content = f.read()
+            
+            # Convert markdown to plain text (removing markdown syntax)
+            # We'll use a simple approach that preserves structure
+            # For markdown files, we treat the whole file as one "page"
+            # but can be split into chunks if needed
+            
+            # Simple conversion: remove markdown formatting
+            # Remove code blocks and inline code
+            import re
+            
+            # Remove code blocks
+            text = re.sub(r'```[^`]*```', '', markdown_content, flags=re.DOTALL)
+            # Remove inline code
+            text = re.sub(r'`[^`]*`', '', text)
+            # Remove markdown headers (## Header, ### Header, etc.)
+            text = re.sub(r'^#+\s+(.*)$', r'\1', text, flags=re.MULTILINE)
+            # Remove markdown lists and bullets
+            text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+            # Remove markdown links
+            text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+            # Remove markdown images
+            text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', text)
+            # Replace multiple newlines with single newline
+            text = re.sub(r'\n\s*\n', '\n\n', text)
+            
+            pages_data.append({
+                'page': 1,
+                'text': text.strip(),
+                'total_pages': 1
+            })
+            
+        except Exception as e:
+            print(f"Error processing markdown file {md_path}: {e}")
+            return []
+        
+        return pages_data
+    
     def extract_text_from_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, any]]:
         """
-        Extract text from document (PDF or Word), maintaining structure.
+        Extract text from document (PDF, Word, or Markdown), maintaining structure.
         
         Args:
             doc_path: Path to the document file
@@ -168,6 +224,8 @@ class DocumentProcessor:
             pages_data = self.extract_text_from_pdf(doc_path)
         elif extension in ['.docx', '.doc']:
             pages_data = self.extract_text_from_docx(doc_path)
+        elif extension == '.md':
+            pages_data = self.extract_text_from_markdown(doc_path)
         else:
             print(f"Unsupported file type: {extension}")
             return []
@@ -247,7 +305,7 @@ class DocumentProcessor:
         Complete pipeline: extract text and chunk it.
         
         Args:
-            doc_path: Path to document file (PDF or Word)
+            doc_path: Path to document file (PDF, Word, or Markdown)
             base_dir: Base directory for documents (to extract topics from folder structure)
             
         Returns:
@@ -279,7 +337,7 @@ if __name__ == "__main__":
         chunks = processor.process_document(test_doc)
         print(f"Extracted {len(chunks)} chunks from {test_doc}")
         if chunks:
-            print(f"\nFirst chunk preview:")
+            print("\nFirst chunk preview:")
             print(f"Topics: {chunks[0]['metadata']['topics']}")
             print(chunks[0]['text'][:200])
     else:

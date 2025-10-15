@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 from app.document_processor import DocumentProcessor
 from app.vector_store import VectorStore
-from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR
+from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC
 import sys
 
 
@@ -140,7 +140,7 @@ def add_docs_to_database(doc_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ingest documents (PDF, Word) into the vector store"
+        description="Ingest documents (PDF, Word, Markdown) into the vector store"
     )
     parser.add_argument(
         "--doc-dir",
@@ -168,6 +168,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # Import here to avoid circular dependency
-    from config import DEFAULT_TOPIC
     main()
