@@ -60,12 +60,12 @@ def scan_all_my_documents(doc_dir: str):
         print(f"  {ext}: {count} files")
     
     # Initialize store
-    store = VectorStore()
+    vector_store = VectorStore()
     
     # Reset database if requested
     if reset_database:
         print("\n⚠ Resetting vector store (clearing all existing documents)...")
-        store.reset()
+        vector_store.reset()
         print("✓ Vector store reset complete")
         
         # Clear document cache to ensure fresh extraction
@@ -96,7 +96,7 @@ def scan_all_my_documents(doc_dir: str):
             
             if chunks:
                 # Add to vector store
-                num_added = store.add_documents(chunks)
+                num_added = vector_store.add_documents(chunks)
                 total_chunks += num_added
                 successful += 1
                 
@@ -145,7 +145,7 @@ def scan_all_my_documents(doc_dir: str):
             print(f"  {ext}: {stats['docs']} documents, {stats['chunks']} chunks")
     
     print(f"\nVector store stats:")
-    stats = store.get_stats()
+    stats = vector_store.get_stats()
     print(f"  Total chunks in store: {stats['total_chunks']}")
     print(f"  Total documents: {stats['total_documents']}")
     print(f"  Total topics: {stats['total_topics']}")

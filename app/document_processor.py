@@ -254,7 +254,7 @@ class DocumentProcessor:
         # Get file metadata
         file_size = doc_path.stat().st_size
         last_modified = doc_path.stat().st_mtime
-        
+
         # Check cache
         cache_file = self._get_cache_path(doc_path)
         if cache_file.exists():
@@ -281,6 +281,9 @@ class DocumentProcessor:
             print(f"Unsupported file type: {extension}")
             return []
         
+
+        print(f"\n⚠ File: {doc_path}, Found file_size = {file_size} bytes, last_modified = {last_modified} (after caching check)")
+            
         # Add metadata to each page
         result = []
         for page_data in pages_data:
