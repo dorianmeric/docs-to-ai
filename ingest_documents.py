@@ -94,7 +94,7 @@ def ingest_documents(doc_dir: str):
                 
                 # Track per-filetype stats
                 if ext not in filetype_stats:
-                    filetype_stats[ext] = {'docs': 0, 'chunks': 0}
+                    filetype_stats[ext] = {'docs': 0, 'chunks': 0}  
                 filetype_stats[ext]['docs'] += 1
                 filetype_stats[ext]['chunks'] += num_added
                 
@@ -146,7 +146,8 @@ def main():
         "--doc-dir",
         type=str,
         required=True,
-        help="Directory containing documents (organized by topic folders)"
+        help="Directory containing documents (organized by topic folders)",
+        default="./docs"
     )
     parser.add_argument(
         "--reset",

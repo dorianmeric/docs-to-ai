@@ -1,10 +1,10 @@
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF -- Library for PDF processing
 from pathlib import Path
 from typing import List, Dict, Optional
 import hashlib
 import json
 from docx import Document as DocxDocument
-from config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, SUPPORTED_EXTENSIONS
+from config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC
 
 
 class DocumentProcessor:
@@ -66,7 +66,7 @@ class DocumentProcessor:
         pages_data = []
         
         try:
-            doc = fitz.open(pdf_path)
+            doc = pymupdf.open(pdf_path)
             
             for page_num in range(len(doc)):
                 page = doc[page_num]

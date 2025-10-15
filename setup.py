@@ -23,20 +23,20 @@ def create_directories():
         print(f"  ✓ {directory}")
 
 
-def create_env_file():
-    """Create .env file if it doesn't exist."""
-    env_file = Path(".env")
-    env_example = Path(".env.example")
+# def create_env_file():
+#     """Create .env file if it doesn't exist."""
+#     env_file = Path(".env")
+#     env_example = Path(".env.example")
     
-    if not env_file.exists() and env_example.exists():
-        print("\nCreating .env file...")
-        with open(env_example, 'r') as src:
-            content = src.read()
-        with open(env_file, 'w') as dst:
-            dst.write(content)
-        print("  ✓ .env created from .env.example")
-    else:
-        print("\n.env file already exists")
+#     if not env_file.exists() and env_example.exists():
+#         print("\nCreating .env file...")
+#         with open(env_example, 'r') as src:
+#             content = src.read()
+#         with open(env_file, 'w') as dst:
+#             dst.write(content)
+#         print("  ✓ .env created from .env.example")
+#     else:
+#         print("\n.env file already exists")
 
 
 def check_dependencies():
@@ -46,7 +46,7 @@ def check_dependencies():
     required_packages = [
         'chromadb',
         'sentence_transformers',
-        'fitz',  # PyMuPDF
+        'pymupdf',  # PyMuPDF
         'docx',  # python-docx
         'mcp'
     ]
@@ -131,7 +131,7 @@ def main():
     create_directories()
     
     # Create .env file
-    create_env_file()
+    # create_env_file()
     
     # Check dependencies
     if not check_dependencies():

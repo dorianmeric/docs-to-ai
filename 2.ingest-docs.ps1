@@ -1,0 +1,1 @@
+python ingest_documents.py --doc-dir docs

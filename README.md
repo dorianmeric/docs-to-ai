@@ -67,7 +67,7 @@ cp .env.example .env
 ### 1. Ingest PDFs
 
 ```bash
-python ingest_pdfs.py --pdf-dir /path/to/your/pdfs
+python ingest_documents.py --doc-dir /path/to/your/pdfs
 ```
 
 The script will:
@@ -128,7 +128,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 - `mcp_server.py` - Main MCP server implementation
 - `pdf_processor.py` - PDF text extraction and chunking
 - `vector_store.py` - Vector database operations
-- `ingest_pdfs.py` - Batch PDF ingestion script
+- `ingest_documents.py` - Batch PDF ingestion script
 - `requirements.txt` - Python dependencies
 - `config.py` - Configuration settings
 
