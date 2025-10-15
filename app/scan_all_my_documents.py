@@ -66,7 +66,12 @@ def scan_all_my_documents(doc_dir: str):
     if reset_database:
         print("\n⚠ Resetting vector store (clearing all existing documents)...")
         store.reset()
-        print("✓ Vector store reset complete\n")
+        print("✓ Vector store reset complete")
+        
+        # Clear document cache to ensure fresh extraction
+        print("\n⚠ Clearing document cache...")
+        processor.clear_document_cache()
+        print("✓ Document cache cleared\n")
     
     # Process each document
     total_chunks = 0

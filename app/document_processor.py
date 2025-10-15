@@ -366,6 +366,14 @@ class DocumentProcessor:
         chunks = self.chunk_text(pages_data)
         return chunks
     
+    def clear_document_cache(self):
+        """Clear all cached document extractions."""
+        import shutil
+        if self.cache_dir.exists():
+            shutil.rmtree(self.cache_dir)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            print("Document cache cleared")
+    
     def _get_cache_path(self, doc_path: Path) -> Path:
         """Generate cache file path for a document."""
         doc_hash = hashlib.md5(str(doc_path).encode()).hexdigest()
