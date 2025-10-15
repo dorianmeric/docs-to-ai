@@ -4,9 +4,7 @@
 FROM python:3.13-slim AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libmupdf-dev \
- && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y build-essential  && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -21,7 +19,9 @@ RUN pip install --no-cache-dir sentence-transformers
 
 # Install Python dependencies into a clean target directory
 # RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+
 # RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt \
 #  && find /install -type d -name "__pycache__" -exec rm -rf {} + \
 #  && find /install -type f -name "*.pyc" -delete
