@@ -1,0 +1,1 @@
+python add_docs_to_database.py --doc-dir docs

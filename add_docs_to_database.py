@@ -6,7 +6,7 @@ from config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR
 import sys
 
 
-def ingest_documents(doc_dir: str):
+def add_docs_to_database(doc_dir: str):
     """
     Ingest all documents (PDFs and Word) from a directory into the vector store.
     Uses folder structure to tag documents with hierarchical topics.
@@ -164,7 +164,7 @@ def main():
         store.reset()
     
     # Ingest documents
-    ingest_documents(args.doc_dir)
+    add_docs_to_database(args.doc_dir)
 
 
 if __name__ == "__main__":

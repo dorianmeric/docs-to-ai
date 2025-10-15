@@ -189,7 +189,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 filter_msg = f" with topic '{topic_filter}'" if topic_filter else ""
                 return [TextContent(
                     type="text",
-                    text=f"No documents found{filter_msg}. Use ingest_documents.py to add documents."
+                    text=f"No documents found{filter_msg}. Use add_docs_to_database.py to add documents."
                 )]
             
             # Group by first topic for display
@@ -230,7 +230,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if not topics:
                 return [TextContent(
                     type="text",
-                    text="No topics found. Use ingest_documents.py to add documents."
+                    text="No topics found. Use add_docs_to_database.py to add documents."
                 )]
             
             stats = vector_store.get_stats()
