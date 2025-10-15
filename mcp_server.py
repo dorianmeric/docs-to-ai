@@ -85,7 +85,7 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
-            name="get_document_stats",
+            name="get_collection_stats",
             description=(
                 "Get statistics about the document collection, including total number "
                 "of documents, topics, file types, and chunks stored in the vector database. "
@@ -249,7 +249,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 text=response
             )]
         
-        elif name == "get_document_stats":
+        elif name == "get_collection_stats":
             stats = vector_store.get_stats()
             
             response = "Document Collection Statistics:\n\n"

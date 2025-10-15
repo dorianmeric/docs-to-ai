@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  docs-to-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docs-to-ai-mcp
+    image: docs-to-ai:latest
+    
+    # Volumes for persistent data
+    volumes:
+      # ChromaDB database (persists the vector store)
+      - ./chroma_db:/app/chroma_db
+      # Document cache (persists extracted text)
+      - ./doc_cache:/app/doc_cache
+      # Documents directory (your PDFs and Word docs)
+      - ./docs:/app/docs:ro  # Read-only to prevent accidental modifications
+    
+    # Environment variables (optional)
+    environment:
+      - PYTHONUNBUFFERED=1
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional - adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    
+    # Stdin/stdout for MCP protocol
+    stdin_open: true
+    tty: true
+    
+    # Command can be overridden
+    # command: python mcp_server.py
+
+  # Optional: Service to run document ingestion
+  docs-addfiles:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docs-to-ai-addfiles
+    image: docs-to-ai:latest
+    
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./doc_cache:/app/doc_cache
+      - ./docs:/app/docs:ro
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+    
+    # Override command to run ingestion script
+    command: python add_docs_to_database.py --doc-dir /app/docs
+    
+    # Run once and exit
+    restart: "no"
+    
+    # Only start this service manually with: docker-compose up docs-ingestion
+    profiles:
+      - addfiles

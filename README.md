@@ -49,25 +49,12 @@ pdfs/
     └── visualization.pdf
 ```
 
-## Installation
-
-1. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-2. Set up your environment:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-## Usage
-
-### 1. Ingest PDFs
+## 1. Installation, with local python
 
 ```bash
-python add_docs_to_database.py --doc-dir /path/to/your/pdfs
+pip install -r requirements.txt  # Install dependencies:
+python add_docs_to_database.py --doc-dir ./docs #  Ingest PDFs
+python mcp_server.py #  Start the MCP Server
 ```
 
 The script will:
@@ -102,13 +89,25 @@ Documents per topic:
   Python_Programming: 5 documents, 133 chunks
 ```
 
-### 2. Start the MCP Server
+Add to your Claude Desktop config (`claude_desktop_config.json`):
 
-```bash
-python mcp_server.py
+```json
+{
+  "mcpServers": {
+    "docs-to-ai": {
+      "command": "python",
+      "args": ["C:/[UPDATE_PATH_TO_DOCS-TO-AI]/docs-to-ai/mcp_server.py"]
+    }
+  }
+}
 ```
 
-### 3. Configure Claude Desktop
+
+## 2. Installation, with docker
+You need Docker Desktop, or Docker Engine, running. Then just:
+```bash
+./start-DocsToAI-in-docker.ps1  # builds and run the image, with docker-compose
+```
 
 Add to your Claude Desktop config (`claude_desktop_config.json`):
 
@@ -117,7 +116,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
   "mcpServers": {
     "docs-to-ai": {
       "command": "python",
-      "args": ["C:/path/to/docs-to-ai/mcp_server.py"]
+      "args": ["C:/[UPDATE_PATH_TO_DOCS-TO-AI]/docs-to-ai/mcp_server.py"]
     }
   }
 }
@@ -137,7 +136,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 - `search_documents` - Semantic search across all PDFs (with optional topic filter)
 - `list_documents` - List all available documents (with optional topic filter)
 - `list_topics` - List all topics/categories
-- `get_document_stats` - Get statistics about the collection
+- `get_collection_stats` - Get statistics about the collection
 
 ### Example Queries for Claude
 

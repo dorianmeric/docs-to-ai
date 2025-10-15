@@ -28,7 +28,8 @@ env/
 ENV/
 
 # Environment variables
-#.env
+.env
+.env.local
 
 # IDE
 .vscode/
@@ -56,3 +57,7 @@ test.pdf
 
 
 docs/
+
+# Docker
+.dockerignore
+docker-compose.override.yml
