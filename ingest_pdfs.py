@@ -8,7 +8,7 @@ import sys
 def ingest_pdfs(pdf_dir: str, recursive: bool = False):
     """
     Ingest all PDFs from a directory into the vector store.
-    Uses folder structure to tag documents with topics.
+    Uses full folder hierarchy from the base directory to tag documents with topics.
     
     Args:
         pdf_dir: Directory containing PDFs (organized by topic folders)
@@ -33,8 +33,9 @@ def ingest_pdfs(pdf_dir: str, recursive: bool = False):
     # Analyze folder structure
     topics = set()
     for pdf_file in pdf_files:
-        if pdf_file.parent != pdf_path:
-            topics.add(pdf_file.parent.name)
+        rel_path = pdf_file.parent.relative_to(pdf_path)
+        folder_chain = [part for part in rel_path.parts if part]
+        topics.update(folder_chain)
     
     if topics:
         print(f"\nDetected topics: {', '.join(sorted(topics))}")
@@ -52,27 +53,34 @@ def ingest_pdfs(pdf_dir: str, recursive: bool = False):
     topic_stats = {}
     
     for i, pdf_file in enumerate(pdf_files, 1):
-        # Extract topic for display
-        topic = processor.extract_topic_from_path(pdf_file, pdf_path)
+        # Extract all folder levels as topics
+        rel_path = pdf_file.parent.relative_to(pdf_path)
+        topic_hierarchy = [part for part in rel_path.parts if part]
+        topic_display = " > ".join(topic_hierarchy) if topic_hierarchy else "Base Folder"
         
         print(f"\n[{i}/{len(pdf_files)}] Processing: {pdf_file.name}")
-        print(f"  Topic: {topic}")
+        print(f"  Topics: {topic_hierarchy}")
         
         try:
             # Process PDF with base directory for topic extraction
             chunks = processor.process_pdf(str(pdf_file), str(pdf_path))
             
             if chunks:
+                # Add topic tags to chunks (if the processor supports metadata)
+                for chunk in chunks:
+                    chunk['metadata']['topics'] = topic_hierarchy
+                
                 # Add to vector store
                 num_added = store.add_documents(chunks)
                 total_chunks += num_added
                 successful += 1
                 
                 # Track per-topic stats
-                if topic not in topic_stats:
-                    topic_stats[topic] = {'docs': 0, 'chunks': 0}
-                topic_stats[topic]['docs'] += 1
-                topic_stats[topic]['chunks'] += num_added
+                for topic in topic_hierarchy:
+                    if topic not in topic_stats:
+                        topic_stats[topic] = {'docs': 0, 'chunks': 0}
+                    topic_stats[topic]['docs'] += 1
+                    topic_stats[topic]['chunks'] += num_added
                 
                 print(f"  ✓ Added {num_added} chunks")
             else:

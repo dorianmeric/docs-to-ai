@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-MCP Server for querying PDF documents.
+MCP Server for querying documents (PDFs and Word docs).
 
 This server exposes tools that allow Claude to search and retrieve
-information from a collection of PDF documents stored in a vector database.
+information from a collection of documents stored in a vector database.
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from typing import Optional
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from vector_store import VectorStore
-from config import DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS
+from config import DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, TOPIC_SEPARATOR
 
 # Initialize server
 app = Server("doc-to-ai")
@@ -28,9 +28,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="search_documents",
             description=(
-                "Search across all PDF documents using semantic similarity. "
-                "Returns the most relevant text chunks with their source information and topics. "
-                "Use this when you need to find information across all documents. "
+                "Search across all documents (PDFs and Word) using semantic similarity. "
+                "Returns the most relevant text chunks with their source information and hierarchical topics. "
+                "Documents are tagged with all topics in their folder hierarchy. "
                 "Optionally filter by topic to search within specific categories."
             ),
             inputSchema={
@@ -49,7 +49,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "topic": {
                         "type": "string",
-                        "description": "Optional: Filter results to a specific topic/category. Use list_topics to see available topics."
+                        "description": "Optional: Filter results to documents that have this topic (at any level in hierarchy)"
                     }
                 },
                 "required": ["query"]
@@ -58,15 +58,16 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="list_documents",
             description=(
-                "Get a list of all available PDF documents in the system with their topics. "
-                "Use this to see what documents are available to search and how they are organized."
+                "Get a list of all available documents with their hierarchical topics. "
+                "Shows PDFs and Word documents organized by their folder hierarchy. "
+                "Each document shows all topics from its folder path."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "topic": {
                         "type": "string",
-                        "description": "Optional: Filter to show only documents from a specific topic"
+                        "description": "Optional: Filter to show only documents that have this topic"
                     }
                 }
             }
@@ -75,8 +76,8 @@ async def list_tools() -> list[Tool]:
             name="list_topics",
             description=(
                 "Get a list of all topics/categories in the document collection. "
-                "Topics are derived from the folder structure where PDFs are organized. "
-                "Use this to see what topics are available for filtering searches."
+                "Topics are derived from the folder hierarchy where documents are organized. "
+                "Each folder level becomes a separate topic tag."
             ),
             inputSchema={
                 "type": "object",
@@ -87,8 +88,8 @@ async def list_tools() -> list[Tool]:
             name="get_document_stats",
             description=(
                 "Get statistics about the document collection, including total number "
-                "of documents, topics, and chunks stored in the vector database. "
-                "Shows the distribution of documents across topics."
+                "of documents, topics, file types, and chunks stored in the vector database. "
+                "Shows the distribution of documents across topics and file types."
             ),
             inputSchema={
                 "type": "object",
@@ -110,28 +111,52 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "search_documents":
             query = arguments.get("query")
             max_results = arguments.get("max_results", DEFAULT_SEARCH_RESULTS)
+            topic_filter = arguments.get("topic")
             
             # Validate max_results
             max_results = min(max(1, max_results), MAX_SEARCH_RESULTS)
             
-            results = vector_store.search(query, n_results=max_results)
+            # Perform search (get more results if filtering by topic)
+            search_limit = max_results * 3 if topic_filter else max_results
+            results = vector_store.search(query, n_results=search_limit)
+            
+            # Filter by topic if specified (check if topic appears in topics list)
+            if topic_filter:
+                filtered_results = []
+                for r in results:
+                    doc_topics = r['metadata'].get('topics', [])
+                    if isinstance(doc_topics, str):
+                        doc_topics = [doc_topics]
+                    if topic_filter in doc_topics:
+                        filtered_results.append(r)
+                results = filtered_results[:max_results]
             
             if not results:
+                filter_msg = f" with topic '{topic_filter}'" if topic_filter else ""
                 return [TextContent(
                     type="text",
-                    text=f"No results found for query: '{query}'"
+                    text=f"No results found for query: '{query}'{filter_msg}"
                 )]
             
             # Format results
-            response_parts = [f"Found {len(results)} relevant chunks for query: '{query}'\n"]
+            filter_info = f" (filtered to topic: '{topic_filter}')" if topic_filter else ""
+            response_parts = [f"Found {len(results)} relevant chunks for query: '{query}'{filter_info}\n"]
             
             for i, result in enumerate(results, 1):
                 metadata = result['metadata']
                 filename = metadata.get('filename', 'Unknown')
                 page = metadata.get('page', 'Unknown')
+                topics = metadata.get('topics', ['uncategorized'])
+                filetype = metadata.get('filetype', '.pdf')
+                
+                if isinstance(topics, str):
+                    topics = [topics]
+                
+                topics_display = TOPIC_SEPARATOR.join(topics)
                 
                 response_parts.append(f"\n--- Result {i} ---")
-                response_parts.append(f"Source: {filename} (Page {page})")
+                response_parts.append(f"Topics: {topics_display}")
+                response_parts.append(f"Source: {filename} ({filetype}) [Page {page}]")
                 
                 if result.get('distance') is not None:
                     # Lower distance = higher relevance
@@ -146,17 +171,78 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )]
         
         elif name == "list_documents":
+            topic_filter = arguments.get("topic")
             documents = vector_store.list_documents()
             
+            # Filter by topic if specified (check if topic appears in topics list)
+            if topic_filter:
+                filtered_docs = []
+                for doc in documents:
+                    doc_topics = doc.get('topics', [])
+                    if isinstance(doc_topics, str):
+                        doc_topics = [doc_topics]
+                    if topic_filter in doc_topics:
+                        filtered_docs.append(doc)
+                documents = filtered_docs
+            
             if not documents:
+                filter_msg = f" with topic '{topic_filter}'" if topic_filter else ""
                 return [TextContent(
                     type="text",
-                    text="No documents found in the vector store. Use ingest_pdfs.py to add documents."
+                    text=f"No documents found{filter_msg}. Use ingest_documents.py to add documents."
                 )]
             
-            response = f"Available documents ({len(documents)}):\n\n"
-            for i, doc in enumerate(documents, 1):
-                response += f"{i}. {doc}\n"
+            # Group by first topic for display
+            docs_by_first_topic = {}
+            for doc in documents:
+                topics = doc.get('topics', ['uncategorized'])
+                if isinstance(topics, str):
+                    topics = [topics]
+                first_topic = topics[0] if topics else 'uncategorized'
+                
+                if first_topic not in docs_by_first_topic:
+                    docs_by_first_topic[first_topic] = []
+                docs_by_first_topic[first_topic].append(doc)
+            
+            response_parts = []
+            filter_info = f" (filtered to topic: '{topic_filter}')" if topic_filter else ""
+            response_parts.append(f"Available documents{filter_info}: {len(documents)} total\n")
+            
+            for first_topic in sorted(docs_by_first_topic.keys()):
+                topic_docs = docs_by_first_topic[first_topic]
+                response_parts.append(f"\n📁 {first_topic} ({len(topic_docs)} documents)")
+                for doc in topic_docs:
+                    topics = doc.get('topics', ['uncategorized'])
+                    if isinstance(topics, str):
+                        topics = [topics]
+                    topics_display = TOPIC_SEPARATOR.join(topics)
+                    filetype = doc.get('filetype', '.pdf')
+                    response_parts.append(f"  • {doc['filename']} ({filetype}) - {topics_display}")
+            
+            return [TextContent(
+                type="text",
+                text="\n".join(response_parts)
+            )]
+        
+        elif name == "list_topics":
+            topics = vector_store.list_topics()
+            
+            if not topics:
+                return [TextContent(
+                    type="text",
+                    text="No topics found. Use ingest_documents.py to add documents."
+                )]
+            
+            stats = vector_store.get_stats()
+            topic_counts = stats['documents_per_topic']
+            
+            response = f"Available topics ({len(topics)}):\n\n"
+            response += "Topics are hierarchical - each folder in the path becomes a topic.\n"
+            response += "Documents can have multiple topics based on their folder location.\n\n"
+            
+            for topic in topics:
+                count = topic_counts.get(topic, 0)
+                response += f"  📁 {topic}: {count} document{'s' if count != 1 else ''}\n"
             
             return [TextContent(
                 type="text",
@@ -168,13 +254,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             
             response = "Document Collection Statistics:\n\n"
             response += f"Total chunks: {stats['total_chunks']}\n"
-            response += f"Total documents: {len(stats['documents'])}\n"
+            response += f"Total documents: {stats['total_documents']}\n"
+            response += f"Total topics: {stats['total_topics']}\n"
             response += f"Collection: {stats['collection_name']}\n\n"
             
-            if stats['documents']:
-                response += "Documents:\n"
-                for doc in stats['documents']:
-                    response += f"  - {doc}\n"
+            if 'documents_per_filetype' in stats and stats['documents_per_filetype']:
+                response += "Documents per file type:\n"
+                for filetype in sorted(stats['documents_per_filetype'].keys()):
+                    count = stats['documents_per_filetype'][filetype]
+                    response += f"  {filetype}: {count} document{'s' if count != 1 else ''}\n"
+                response += "\n"
+            
+            if stats['topics']:
+                response += "Documents per topic (hierarchical):\n"
+                for topic in sorted(stats['topics']):
+                    count = stats['documents_per_topic'].get(topic, 0)
+                    response += f"  📁 {topic}: {count} document{'s' if count != 1 else ''}\n"
             
             return [TextContent(
                 type="text",

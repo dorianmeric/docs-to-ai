@@ -2,6 +2,32 @@
 
 Get your PDF document query system up and running in 5 minutes!
 
+## Overview
+
+This system helps you organize and search your PDF documents by:
+1. Organizing PDFs by **topic** (using folder structure)
+2. Converting text to **embeddings** for semantic search
+3. Storing everything in a **vector database**
+4. Letting **Claude** search through your documents
+
+## Document Organization
+
+**Important:** Organize your PDFs in folders by topic:
+
+```
+pdfs/
+├── Machine_Learning/      ← Topic
+│   ├── neural_networks.pdf
+│   └── deep_learning.pdf
+├── Python/               ← Topic
+│   ├── basics.pdf
+│   └── advanced.pdf
+└── Data_Science/         ← Topic
+    └── statistics.pdf
+```
+
+The folder names become **topic tags** that help organize and filter searches.
+
 ## Prerequisites
 
 - Python 3.8 or higher
@@ -34,25 +60,37 @@ This will:
 
 ## Ingesting PDFs
 
-### Option 1: Use the default `pdfs` folder
+### Step 1: Organize Your PDFs
 
-1. Create a `pdfs` folder and add your PDF files
-2. Run:
+Create folders for each topic and place related PDFs inside:
+
+```bash
+mkdir -p pdfs/Machine_Learning
+mkdir -p pdfs/Python_Programming
+mkdir -p pdfs/Data_Science
+
+# Move your PDFs into the appropriate folders
+```
+
+### Step 2: Run Ingestion
+
 ```bash
 python ingest_pdfs.py --pdf-dir ./pdfs
 ```
 
-### Option 2: Specify a custom directory
+The script will:
+- Find all PDFs in subdirectories
+- Extract the topic from folder names
+- Process and store each document
 
-```bash
-python ingest_pdfs.py --pdf-dir /path/to/your/pdfs
+You'll see output like:
 ```
+Found 12 PDF files
+Detected topics: Data_Science, Machine_Learning, Python_Programming
 
-### Option 3: Recursive search
-
-To include PDFs from subdirectories:
-```bash
-python ingest_pdfs.py --pdf-dir /path/to/your/pdfs --recursive
+[1/12] Processing: neural_networks.pdf
+  Topic: Machine_Learning
+  ✓ Added 45 chunks
 ```
 
 ## Testing
@@ -107,12 +145,30 @@ Close and reopen Claude Desktop for the changes to take effect.
 
 Once configured, you can ask Claude questions like:
 
+### General Queries
 - "What documents do you have access to?"
-- "Search for information about machine learning"
-- "Find mentions of Python programming"
-- "What does the document say about data privacy?"
+- "What topics are available?"
+- "Give me statistics about the document collection"
 
-Claude will use the MCP tools to search your PDF documents and provide relevant answers!
+### Search Queries
+- "Search for information about neural networks"
+- "Find mentions of data visualization"
+- "What do the documents say about Python decorators?"
+
+### Topic-Specific Queries
+- "Search for machine learning concepts in the Machine_Learning topic"
+- "Show me all Python_Programming documents"
+- "Find information about statistics in the Data_Science topic"
+
+### Advanced Queries
+- "Compare what different topics say about optimization"
+- "Find all documents that mention both Python and data science"
+- "Summarize the key concepts from the Machine_Learning documents"
+
+Claude will use the MCP tools to:
+1. Search through your organized documents
+2. Filter by topic when needed
+3. Return relevant information with source citations
 
 ## Troubleshooting
 

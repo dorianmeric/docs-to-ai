@@ -30,7 +30,7 @@ def test_pdf_processor():
             print(chunks[0]['text'][:200])
             print(f"\nMetadata: {chunks[0]['metadata']}")
     else:
-        print(f"\n⚠ No test.pdf found. Place a test PDF in the root directory to test extraction.")
+        print(f"\n⚠ No test.pdf found. Place a test document in the root directory to test extraction.")
     
     return True
 
@@ -76,17 +76,17 @@ def test_integration():
     print("Integration Test")
     print("="*60)
     
-    # Check if we have a test PDF
-    test_pdf = Path("test.pdf")
-    if not test_pdf.exists():
+    # Check if we have a test document
+    test_doc = Path("test.pdf")
+    if not test_doc.exists():
         print("⚠ Skipping integration test - no test.pdf found")
         return True
     
-    print(f"\nRunning full pipeline on {test_pdf}...")
+    print(f"\nRunning full pipeline on {test_doc}...")
     
-    # Process PDF
-    processor = PDFProcessor()
-    chunks = processor.process_pdf(str(test_pdf))
+    # Process document
+    processor = DocumentProcessor()
+    chunks = processor.process_document(str(test_doc))
     print(f"✓ Extracted {len(chunks)} chunks")
     
     if not chunks:
@@ -114,7 +114,7 @@ def main():
     print("="*60 + "\n")
     
     tests = [
-        ("PDF Processor", test_pdf_processor),
+        ("Document Processor", test_document_processor),
         ("Vector Store", test_vector_store),
         ("Integration", test_integration)
     ]

@@ -52,3 +52,6 @@ Thumbs.db
 # Test files
 test.pdf
 *.tmp
+
+
+docs/

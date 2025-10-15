@@ -4,7 +4,7 @@ from pathlib import Path
 # Paths
 BASE_DIR = Path(__file__).parent
 CHROMA_DB_DIR = BASE_DIR / "chroma_db"
-PDF_CACHE_DIR = BASE_DIR / "pdf_cache"
+DOC_CACHE_DIR = BASE_DIR / "doc_cache"
 
 # Embedding Configuration
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # sentence-transformers model
@@ -19,12 +19,16 @@ DEFAULT_SEARCH_RESULTS = 5
 MAX_SEARCH_RESULTS = 20
 
 # Topic/Folder Configuration
-USE_FOLDER_AS_TOPIC = True  # Use parent folder name as topic tag
+USE_FOLDER_AS_TOPIC = True  # Use folder hierarchy as topic tags
 DEFAULT_TOPIC = "uncategorized"  # Default topic if no folder structure
+TOPIC_SEPARATOR = " > "  # Separator for hierarchical topics in display
+
+# Document Processing Configuration
+SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc']  # Supported document types
 
 # ChromaDB Configuration
-CHROMA_COLLECTION_NAME = "doc-to-ai-collection"
+CHROMA_COLLECTION_NAME = "documents"
 
 # Create necessary directories
 CHROMA_DB_DIR.mkdir(exist_ok=True)
-PDF_CACHE_DIR.mkdir(exist_ok=True)
+DOC_CACHE_DIR.mkdir(exist_ok=True)

@@ -5,7 +5,7 @@ Run this after installing requirements to set up the environment.
 
 import os
 from pathlib import Path
-from config import CHROMA_DB_DIR, PDF_CACHE_DIR
+from config import CHROMA_DB_DIR, DOC_CACHE_DIR
 
 
 def create_directories():
@@ -14,8 +14,8 @@ def create_directories():
     
     directories = [
         CHROMA_DB_DIR,
-        PDF_CACHE_DIR,
-        Path("pdfs")  # Default PDF directory
+        DOC_CACHE_DIR,
+        Path("docs")  # Default documents directory
     ]
     
     for directory in directories:
@@ -47,6 +47,7 @@ def check_dependencies():
         'chromadb',
         'sentence_transformers',
         'fitz',  # PyMuPDF
+        'docx',  # python-docx
         'mcp'
     ]
     
@@ -91,12 +92,15 @@ def print_next_steps():
     print("SETUP COMPLETE!")
     print("="*60)
     print("\nNext steps:")
-    print("\n1. Add your PDF files:")
-    print("   - Place PDFs in the 'pdfs' directory")
-    print("   - Or use any directory you prefer")
+    print("\n1. Add your documents:")
+    print("   - Organize PDFs and Word docs in folders by topic")
+    print("   - Place documents in the 'docs' directory")
+    print("   - Folder hierarchy becomes topic tags")
+    print("   - Example: docs/Project_Name/Legal_Docs/contract.pdf")
+    print("     → Topics: ['Project_Name', 'Legal_Docs']")
     
-    print("\n2. Ingest your PDFs:")
-    print("   python ingest_pdfs.py --pdf-dir ./pdfs")
+    print("\n2. Ingest your documents:")
+    print("   python ingest_documents.py --doc-dir ./docs")
     
     print("\n3. Test the system:")
     print("   python test_system.py")

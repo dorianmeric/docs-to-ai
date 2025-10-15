@@ -6,7 +6,8 @@ from config import (
     CHROMA_DB_DIR, 
     CHROMA_COLLECTION_NAME, 
     EMBEDDING_MODEL,
-    DEFAULT_SEARCH_RESULTS
+    DEFAULT_SEARCH_RESULTS,
+    TOPIC_SEPARATOR
 )
 
 
@@ -30,7 +31,7 @@ class VectorStore:
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
             name=CHROMA_COLLECTION_NAME,
-            metadata={"description": "PDF document chunks"}
+            metadata={"description": "Document chunks with hierarchical topics"}
         )
         
         print(f"Vector store initialized. Documents in collection: {self.collection.count()}")
@@ -40,7 +41,7 @@ class VectorStore:
         Add document chunks to the vector store.
         
         Args:
-            chunks: List of chunks from PDFProcessor
+            chunks: List of chunks from DocumentProcessor
             
         Returns:
             Number of chunks added
@@ -123,30 +124,34 @@ class VectorStore:
         
         return None
     
-    def list_documents(self) -> List[Dict[str, str]]:
+    def list_documents(self) -> List[Dict[str, any]]:
         """
         Get list of all unique documents in the store with their topics.
         
         Returns:
-            List of dicts with 'filename', 'topic', and 'filepath'
+            List of dicts with 'filename', 'topics', 'filepath', and 'filetype'
         """
         # Get all documents
         all_docs = self.collection.get()
         
-        # Extract unique documents (by filepath to handle same filename in different topics)
+        # Extract unique documents (by filepath)
         documents = {}
         if all_docs['metadatas']:
             for metadata in all_docs['metadatas']:
                 filepath = metadata.get('filepath', '')
                 if filepath and filepath not in documents:
+                    topics = metadata.get('topics', ['uncategorized'])
+                    if isinstance(topics, str):
+                        topics = [topics]  # Handle old single-topic format
                     documents[filepath] = {
                         'filename': metadata.get('filename', 'Unknown'),
-                        'topic': metadata.get('topic', 'uncategorized'),
-                        'filepath': filepath
+                        'topics': topics,
+                        'filepath': filepath,
+                        'filetype': metadata.get('filetype', '.pdf')
                     }
         
-        # Sort by topic, then filename
-        sorted_docs = sorted(documents.values(), key=lambda x: (x['topic'], x['filename']))
+        # Sort by first topic, then filename
+        sorted_docs = sorted(documents.values(), key=lambda x: (x['topics'][0] if x['topics'] else '', x['filename']))
         return sorted_docs
     
     def list_topics(self) -> List[str]:
@@ -154,17 +159,20 @@ class VectorStore:
         Get list of all unique topics in the store.
         
         Returns:
-            List of topic names
+            List of topic names (flattened from all hierarchies)
         """
         # Get all documents
         all_docs = self.collection.get()
         
-        # Extract unique topics
+        # Extract unique topics (flatten all topic lists)
         topics = set()
         if all_docs['metadatas']:
             for metadata in all_docs['metadatas']:
-                topic = metadata.get('topic', 'uncategorized')
-                topics.add(topic)
+                doc_topics = metadata.get('topics', ['uncategorized'])
+                if isinstance(doc_topics, str):
+                    topics.add(doc_topics)  # Handle old single-topic format
+                else:
+                    topics.update(doc_topics)
         
         return sorted(list(topics))
     
@@ -173,11 +181,17 @@ class VectorStore:
         documents = self.list_documents()
         topics = self.list_topics()
         
-        # Count documents per topic
+        # Count documents per topic (a document can appear in multiple topics)
         topic_counts = {}
         for doc in documents:
-            topic = doc['topic']
-            topic_counts[topic] = topic_counts.get(topic, 0) + 1
+            for topic in doc['topics']:
+                topic_counts[topic] = topic_counts.get(topic, 0) + 1
+        
+        # Count by filetype
+        filetype_counts = {}
+        for doc in documents:
+            filetype = doc.get('filetype', '.pdf')
+            filetype_counts[filetype] = filetype_counts.get(filetype, 0) + 1
         
         return {
             'total_chunks': self.collection.count(),
@@ -186,6 +200,7 @@ class VectorStore:
             'documents': documents,
             'topics': topics,
             'documents_per_topic': topic_counts,
+            'documents_per_filetype': filetype_counts,
             'collection_name': CHROMA_COLLECTION_NAME
         }
     
@@ -229,11 +244,14 @@ class VectorStore:
         # Get all documents
         all_docs = self.collection.get()
         
-        # Find IDs matching the topic
+        # Find IDs where topic appears in the topics list
         ids_to_delete = []
         if all_docs['metadatas']:
             for i, metadata in enumerate(all_docs['metadatas']):
-                if metadata.get('topic') == topic:
+                doc_topics = metadata.get('topics', [])
+                if isinstance(doc_topics, str):
+                    doc_topics = [doc_topics]
+                if topic in doc_topics:
                     ids_to_delete.append(all_docs['ids'][i])
         
         # Delete
@@ -248,7 +266,7 @@ class VectorStore:
         self.client.delete_collection(CHROMA_COLLECTION_NAME)
         self.collection = self.client.create_collection(
             name=CHROMA_COLLECTION_NAME,
-            metadata={"description": "PDF document chunks"}
+            metadata={"description": "Document chunks with hierarchical topics"}
         )
         print("Vector store reset")
 
@@ -261,6 +279,8 @@ if __name__ == "__main__":
     stats = store.get_stats()
     print(f"\nVector Store Stats:")
     print(f"Total chunks: {stats['total_chunks']}")
+    print(f"Total documents: {stats['total_documents']}")
+    print(f"Total topics: {stats['total_topics']}")
     print(f"Documents: {stats['documents']}")
     
     # Test search
