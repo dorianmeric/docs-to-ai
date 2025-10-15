@@ -123,39 +123,78 @@ class VectorStore:
         
         return None
     
-    def list_documents(self) -> List[str]:
+    def list_documents(self) -> List[Dict[str, str]]:
         """
-        Get list of all unique documents in the store.
+        Get list of all unique documents in the store with their topics.
         
         Returns:
-            List of document filenames
+            List of dicts with 'filename', 'topic', and 'filepath'
         """
         # Get all documents
         all_docs = self.collection.get()
         
-        # Extract unique filenames
-        filenames = set()
+        # Extract unique documents (by filepath to handle same filename in different topics)
+        documents = {}
         if all_docs['metadatas']:
             for metadata in all_docs['metadatas']:
-                if 'filename' in metadata:
-                    filenames.add(metadata['filename'])
+                filepath = metadata.get('filepath', '')
+                if filepath and filepath not in documents:
+                    documents[filepath] = {
+                        'filename': metadata.get('filename', 'Unknown'),
+                        'topic': metadata.get('topic', 'uncategorized'),
+                        'filepath': filepath
+                    }
         
-        return sorted(list(filenames))
+        # Sort by topic, then filename
+        sorted_docs = sorted(documents.values(), key=lambda x: (x['topic'], x['filename']))
+        return sorted_docs
+    
+    def list_topics(self) -> List[str]:
+        """
+        Get list of all unique topics in the store.
+        
+        Returns:
+            List of topic names
+        """
+        # Get all documents
+        all_docs = self.collection.get()
+        
+        # Extract unique topics
+        topics = set()
+        if all_docs['metadatas']:
+            for metadata in all_docs['metadatas']:
+                topic = metadata.get('topic', 'uncategorized')
+                topics.add(topic)
+        
+        return sorted(list(topics))
     
     def get_stats(self) -> Dict:
         """Get statistics about the vector store."""
+        documents = self.list_documents()
+        topics = self.list_topics()
+        
+        # Count documents per topic
+        topic_counts = {}
+        for doc in documents:
+            topic = doc['topic']
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
+        
         return {
             'total_chunks': self.collection.count(),
-            'documents': self.list_documents(),
+            'total_documents': len(documents),
+            'total_topics': len(topics),
+            'documents': documents,
+            'topics': topics,
+            'documents_per_topic': topic_counts,
             'collection_name': CHROMA_COLLECTION_NAME
         }
     
-    def delete_document(self, filename: str) -> int:
+    def delete_document(self, filepath: str) -> int:
         """
-        Delete all chunks from a specific document.
+        Delete all chunks from a specific document by filepath.
         
         Args:
-            filename: Name of the document to delete
+            filepath: Full path of the document to delete
             
         Returns:
             Number of chunks deleted
@@ -163,17 +202,44 @@ class VectorStore:
         # Get all documents
         all_docs = self.collection.get()
         
-        # Find IDs matching the filename
+        # Find IDs matching the filepath
         ids_to_delete = []
         if all_docs['metadatas']:
             for i, metadata in enumerate(all_docs['metadatas']):
-                if metadata.get('filename') == filename:
+                if metadata.get('filepath') == filepath:
                     ids_to_delete.append(all_docs['ids'][i])
         
         # Delete
         if ids_to_delete:
             self.collection.delete(ids=ids_to_delete)
-            print(f"Deleted {len(ids_to_delete)} chunks from {filename}")
+            print(f"Deleted {len(ids_to_delete)} chunks from {filepath}")
+        
+        return len(ids_to_delete)
+    
+    def delete_topic(self, topic: str) -> int:
+        """
+        Delete all chunks from a specific topic.
+        
+        Args:
+            topic: Name of the topic to delete
+            
+        Returns:
+            Number of chunks deleted
+        """
+        # Get all documents
+        all_docs = self.collection.get()
+        
+        # Find IDs matching the topic
+        ids_to_delete = []
+        if all_docs['metadatas']:
+            for i, metadata in enumerate(all_docs['metadatas']):
+                if metadata.get('topic') == topic:
+                    ids_to_delete.append(all_docs['ids'][i])
+        
+        # Delete
+        if ids_to_delete:
+            self.collection.delete(ids=ids_to_delete)
+            print(f"Deleted {len(ids_to_delete)} chunks from topic '{topic}'")
         
         return len(ids_to_delete)
     

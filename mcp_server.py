@@ -15,7 +15,7 @@ from vector_store import VectorStore
 from config import DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS
 
 # Initialize server
-app = Server("pdf-documents")
+app = Server("doc-to-ai")
 
 # Initialize vector store
 vector_store: Optional[VectorStore] = None
@@ -29,8 +29,9 @@ async def list_tools() -> list[Tool]:
             name="search_documents",
             description=(
                 "Search across all PDF documents using semantic similarity. "
-                "Returns the most relevant text chunks with their source information. "
-                "Use this when you need to find information across all documents."
+                "Returns the most relevant text chunks with their source information and topics. "
+                "Use this when you need to find information across all documents. "
+                "Optionally filter by topic to search within specific categories."
             ),
             inputSchema={
                 "type": "object",
@@ -45,6 +46,10 @@ async def list_tools() -> list[Tool]:
                         "default": DEFAULT_SEARCH_RESULTS,
                         "minimum": 1,
                         "maximum": MAX_SEARCH_RESULTS
+                    },
+                    "topic": {
+                        "type": "string",
+                        "description": "Optional: Filter results to a specific topic/category. Use list_topics to see available topics."
                     }
                 },
                 "required": ["query"]
@@ -53,8 +58,25 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="list_documents",
             description=(
-                "Get a list of all available PDF documents in the system. "
-                "Use this to see what documents are available to search."
+                "Get a list of all available PDF documents in the system with their topics. "
+                "Use this to see what documents are available to search and how they are organized."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Optional: Filter to show only documents from a specific topic"
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="list_topics",
+            description=(
+                "Get a list of all topics/categories in the document collection. "
+                "Topics are derived from the folder structure where PDFs are organized. "
+                "Use this to see what topics are available for filtering searches."
             ),
             inputSchema={
                 "type": "object",
@@ -65,7 +87,8 @@ async def list_tools() -> list[Tool]:
             name="get_document_stats",
             description=(
                 "Get statistics about the document collection, including total number "
-                "of documents and chunks stored in the vector database."
+                "of documents, topics, and chunks stored in the vector database. "
+                "Shows the distribution of documents across topics."
             ),
             inputSchema={
                 "type": "object",

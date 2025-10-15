@@ -18,8 +18,12 @@ CHUNK_OVERLAP = 200  # Overlap between chunks
 DEFAULT_SEARCH_RESULTS = 5
 MAX_SEARCH_RESULTS = 20
 
+# Topic/Folder Configuration
+USE_FOLDER_AS_TOPIC = True  # Use parent folder name as topic tag
+DEFAULT_TOPIC = "uncategorized"  # Default topic if no folder structure
+
 # ChromaDB Configuration
-CHROMA_COLLECTION_NAME = "pdf_documents"
+CHROMA_COLLECTION_NAME = "doc-to-ai-collection"
 
 # Create necessary directories
 CHROMA_DB_DIR.mkdir(exist_ok=True)
