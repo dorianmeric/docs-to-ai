@@ -28,7 +28,7 @@ env/
 ENV/
 
 # Environment variables
-.env
+#.env
 
 # IDE
 .vscode/
@@ -41,6 +41,7 @@ chroma_db/
 
 # PDF cache
 pdf_cache/
+doc_cache/
 
 # Logs
 *.log

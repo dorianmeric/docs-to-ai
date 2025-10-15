@@ -127,7 +127,7 @@ Open `claude_desktop_config.json` and add:
 ```json
 {
   "mcpServers": {
-    "pdf-documents": {
+    "doc-to-ai": {
       "command": "python",
       "args": ["C:/D/code/ai-tools/Claude-Controlled/doc-to-ai/mcp_server.py"]
     }

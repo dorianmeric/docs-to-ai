@@ -2,6 +2,7 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Optional
+import json
 from config import (
     CHROMA_DB_DIR, 
     CHROMA_COLLECTION_NAME, 
@@ -52,7 +53,18 @@ class VectorStore:
         # Extract data
         ids = [chunk['id'] for chunk in chunks]
         texts = [chunk['text'] for chunk in chunks]
-        metadatas = [chunk['metadata'] for chunk in chunks]
+        
+        # Convert topics list to JSON string for ChromaDB compatibility
+        metadatas = []
+        for chunk in chunks:
+            metadata = chunk['metadata'].copy()
+            # Convert topics list to JSON string
+            if 'topics' in metadata and isinstance(metadata['topics'], list):
+                metadata['topics_json'] = json.dumps(metadata['topics'])
+                # Also store first topic for simple filtering
+                metadata['primary_topic'] = metadata['topics'][0] if metadata['topics'] else 'uncategorized'
+                del metadata['topics']  # Remove the list
+            metadatas.append(metadata)
         
         # Generate embeddings
         print(f"Generating embeddings for {len(texts)} chunks...")
@@ -68,6 +80,18 @@ class VectorStore:
         
         print(f"Added {len(chunks)} chunks to vector store")
         return len(chunks)
+    
+    def _deserialize_metadata(self, metadata: Dict) -> Dict:
+        """Convert topics_json back to topics list."""
+        if 'topics_json' in metadata:
+            try:
+                metadata['topics'] = json.loads(metadata['topics_json'])
+            except:
+                metadata['topics'] = [metadata.get('primary_topic', 'uncategorized')]
+        elif 'topics' not in metadata:
+            # Handle old format or missing topics
+            metadata['topics'] = [metadata.get('primary_topic', metadata.get('topic', 'uncategorized'))]
+        return metadata
     
     def search(self, query: str, n_results: int = DEFAULT_SEARCH_RESULTS) -> List[Dict]:
         """
@@ -94,10 +118,11 @@ class VectorStore:
         
         if results['ids'] and results['ids'][0]:
             for i in range(len(results['ids'][0])):
+                metadata = self._deserialize_metadata(results['metadatas'][0][i])
                 formatted_results.append({
                     'id': results['ids'][0][i],
                     'text': results['documents'][0][i],
-                    'metadata': results['metadatas'][0][i],
+                    'metadata': metadata,
                     'distance': results['distances'][0][i] if 'distances' in results else None
                 })
         
@@ -116,10 +141,11 @@ class VectorStore:
         result = self.collection.get(ids=[doc_id])
         
         if result['ids']:
+            metadata = self._deserialize_metadata(result['metadatas'][0])
             return {
                 'id': result['ids'][0],
                 'text': result['documents'][0],
-                'metadata': result['metadatas'][0]
+                'metadata': metadata
             }
         
         return None
@@ -140,9 +166,11 @@ class VectorStore:
             for metadata in all_docs['metadatas']:
                 filepath = metadata.get('filepath', '')
                 if filepath and filepath not in documents:
+                    # Deserialize topics
+                    metadata = self._deserialize_metadata(metadata)
                     topics = metadata.get('topics', ['uncategorized'])
                     if isinstance(topics, str):
-                        topics = [topics]  # Handle old single-topic format
+                        topics = [topics]
                     documents[filepath] = {
                         'filename': metadata.get('filename', 'Unknown'),
                         'topics': topics,
@@ -168,9 +196,11 @@ class VectorStore:
         topics = set()
         if all_docs['metadatas']:
             for metadata in all_docs['metadatas']:
+                # Deserialize topics
+                metadata = self._deserialize_metadata(metadata)
                 doc_topics = metadata.get('topics', ['uncategorized'])
                 if isinstance(doc_topics, str):
-                    topics.add(doc_topics)  # Handle old single-topic format
+                    topics.add(doc_topics)
                 else:
                     topics.update(doc_topics)
         
@@ -248,6 +278,8 @@ class VectorStore:
         ids_to_delete = []
         if all_docs['metadatas']:
             for i, metadata in enumerate(all_docs['metadatas']):
+                # Deserialize topics
+                metadata = self._deserialize_metadata(metadata)
                 doc_topics = metadata.get('topics', [])
                 if isinstance(doc_topics, str):
                     doc_topics = [doc_topics]
