@@ -4,9 +4,9 @@ from typing import List, Dict, Optional
 import hashlib
 import json
 from docx import Document as DocxDocument
-import markdown
-from markdown.extensions import Extension
-from markdown.preprocessors import Preprocessor
+# import markdown ~ not used as we chose to stip the markdown formatting manually
+# from markdown.extensions import Extension
+# from markdown.preprocessors import Preprocessor
 from app.config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC
 
 
