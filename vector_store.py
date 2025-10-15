@@ -70,8 +70,8 @@ class VectorStore:
         print(f"Generating embeddings for {len(texts)} chunks...")
         embeddings = self.embedding_model.encode(texts, show_progress_bar=True)
         
-        # Add to collection
-        self.collection.add(
+        # Add to collection (using upsert to prevent duplicates)
+        self.collection.upsert(
             ids=ids,
             embeddings=embeddings.tolist(),
             documents=texts,
