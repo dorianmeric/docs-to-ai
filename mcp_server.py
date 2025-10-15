@@ -18,8 +18,7 @@ from app.folder_watcher import (
     start_watching_folder, 
     stop_watching_folder, 
     get_last_scan_time,
-    trigger_full_scan_if_needed,
-    force_full_scan
+    trigger_full_scan_if_needed
 )
 from app.incremental_updater import process_incremental_changes
 from app.add_docs_to_database import add_docs_to_database
@@ -107,7 +106,7 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
-            name="scan_my_documents",
+            name="scan_all_my_documents",
             description=(
                 "Scan all documents in the docs directory and update the vector database. "
                 "This forces a complete re-indexing: the database is cleared first to prevent duplicates, "
@@ -151,18 +150,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {}
             }
         ),
-        Tool(
-            name="force_full_scan",
-            description=(
-                "Force an immediate full scan of all documents, bypassing the weekly schedule. "
-                "The database is cleared first to prevent duplicates, then all documents are reprocessed. "
-                "Useful when you want to ensure all documents are up to date."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            }
-        )
+
     ]
 
 
@@ -396,7 +384,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 text=response
             )]
         
-        elif name == "scan_my_documents":
+        elif name == "scan_all_my_documents":
             # Run the full scan function directly with database reset
             try:
                 doc_dir = "/app/docs"  # Docker path
@@ -531,30 +519,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     text=f"✗ Error getting last scan time: {str(e)}"
                 )]
         
-        elif name == "force_full_scan":
-            try:
-                result = force_full_scan()
-                
-                if result['status'] == 'full_scan_triggered':
-                    return [TextContent(
-                        type="text",
-                        text="✓ Full scan has been triggered and is now running"
-                    )]
-                elif result['status'] == 'not_watching':
-                    return [TextContent(
-                        type="text",
-                        text="ℹ Folder watcher is not currently active. Start it first with start_watching_folder."
-                    )]
-                else:
-                    return [TextContent(
-                        type="text",
-                        text=f"✗ Error: {result.get('message', 'Unknown error')}"
-                    )]
-            except Exception as e:
-                return [TextContent(
-                    type="text",
-                    text=f"✗ Error forcing full scan: {str(e)}"
-                )]
+
 
         else:
             return [TextContent(
