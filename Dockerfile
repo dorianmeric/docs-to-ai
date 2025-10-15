@@ -1,57 +1,55 @@
-# syntax=docker/dockerfile:1
+# Multi-stage build for docs-to-ai MCP server
+# Stage 1: Build stage
+FROM python:3.13-slim as builder
 
-# Stage 1: Builder
-FROM python:3.13-slim AS builder
-
-# Install build dependencies
+# Install system dependencies for building Python packages
 RUN apt-get update && apt-get install -y build-essential  && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy only dependency list first for caching
+# Copy requirements file
 COPY requirements.txt .
 
-
-RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir sentence-transformers
-
-# Install Python dependencies into a clean target directory
-# RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# Install Python dependenciess
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-
-# RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt \
-#  && find /install -type d -name "__pycache__" -exec rm -rf {} + \
-#  && find /install -type f -name "*.pyc" -delete
-
-
-# Stage 2: Runtime
+# Stage 2: Runtime stage
 FROM python:3.13-slim
 
-# Copy only the installed dependencies
-COPY --from=builder /install /usr/local
+# Install runtime dependencies (needed for PyMuPDF)
+RUN apt-get update && apt-get install -y libmupdf-dev  && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
+# Create non-root user for security
 RUN useradd -m -u 1000 appuser
 
 # Set working directory
 WORKDIR /app
 
-# Copy application source code
-COPY --chown=appuser:appuser . .
+# Copy Python dependencies from builder stage
+COPY --from=builder /root/.local /home/appuser/.local
 
-# Make sure writable directories exist
+# Copy application code
+COPY --chown=appuser:appuser *.py ./
+COPY --chown=appuser:appuser app/*.py ./app/
+COPY --chown=appuser:appuser LICENSE ./
+COPY --chown=appuser:appuser README.md ./
+
+# Create necessary directories with proper permissions
 RUN mkdir -p /app/chroma_db /app/doc_cache /app/docs && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
 
+# Add local Python packages to PATH
+ENV PATH=/home/appuser/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 
-# Health check
-HEALTHCHECK CMD python -c "import mcp, chromadb, sentence_transformers" || exit 1
+# Expose any ports if needed (not required for MCP stdio)
+# EXPOSE 8000
 
-# Default command
+# Health check (optional - checks if Python imports work)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD python -c "import mcp, chromadb, sentence_transformers" || exit 1
+
+# Default command: run the MCP server
 CMD ["python", "mcp_server.py"]
