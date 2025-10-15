@@ -15,7 +15,7 @@ from vector_store import VectorStore
 from config import DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, TOPIC_SEPARATOR
 
 # Initialize server
-app = Server("doc-to-ai")
+app = Server("docs-to-ai")
 
 # Initialize vector store
 vector_store: Optional[VectorStore] = None

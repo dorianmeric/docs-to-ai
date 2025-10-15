@@ -109,7 +109,7 @@ def print_next_steps():
     print("   Add this to your claude_desktop_config.json:")
     print("   {")
     print('     "mcpServers": {')
-    print('       "doc-to-ai": {')
+    print('       "docs-to-ai": {')
     print('         "command": "python",')
     current_dir = Path.cwd()
     print(f'         "args": ["{current_dir / "mcp_server.py"}"]')

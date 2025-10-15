@@ -115,9 +115,9 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "doc-to-ai": {
+    "docs-to-ai": {
       "command": "python",
-      "args": ["C:/path/to/doc-to-ai/mcp_server.py"]
+      "args": ["C:/path/to/docs-to-ai/mcp_server.py"]
     }
   }
 }

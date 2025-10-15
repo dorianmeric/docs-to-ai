@@ -15,7 +15,7 @@ You're a data scientist who wants to organize and search through your collection
 Create a folder structure that reflects your topics:
 
 ```bash
-cd doc-to-ai
+cd docs-to-ai
 mkdir -p pdfs/Machine_Learning
 mkdir -p pdfs/Python_Programming
 mkdir -p pdfs/Data_Science
@@ -63,9 +63,9 @@ PDF DOCUMENT QUERY SYSTEM - SETUP
 ====================================
 
 Creating directories...
-  ✓ C:\...\doc-to-ai\chroma_db
-  ✓ C:\...\doc-to-ai\pdf_cache
-  ✓ C:\...\doc-to-ai\pdfs
+  ✓ C:\...\docs-to-ai\chroma_db
+  ✓ C:\...\docs-to-ai\pdf_cache
+  ✓ C:\...\docs-to-ai\pdfs
 
 Creating .env file...
   ✓ .env created from .env.example
@@ -94,7 +94,7 @@ python ingest_pdfs.py --pdf-dir ./pdfs
 Expected output:
 ```
 Found 14 PDF files
-Base directory: C:\...\doc-to-ai\pdfs
+Base directory: C:\...\docs-to-ai\pdfs
 
 Detected topics: Data_Science, Machine_Learning, Python_Programming, Statistics
 
@@ -198,9 +198,9 @@ Add to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "doc-to-ai": {
+    "docs-to-ai": {
       "command": "python",
-      "args": ["C:/D/code/ai-tools/Claude-Controlled/doc-to-ai/mcp_server.py"]
+      "args": ["C:/D/code/ai-tools/Claude-Controlled/docs-to-ai/mcp_server.py"]
     }
   }
 }
