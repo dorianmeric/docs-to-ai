@@ -78,9 +78,7 @@ foreach ($dir in $dirs) {
 Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
 Write-Host "Quick Start Commands:" -ForegroundColor Cyan
 Write-Host "=" * 60 -ForegroundColor Cyan
-Write-Host "  Build & Start:     ./docker-build-image.ps1" -ForegroundColor White
-Write-Host "  Add Documents:  ./docker-addfiles.ps1" -ForegroundColor White
-Write-Host "  View Logs:         ./docker-logs.ps1" -ForegroundColor White
-Write-Host "  Stop Server:       ./docker-stop.ps1" -ForegroundColor White
-Write-Host "  Manual Commands:   See DOCKER.md" -ForegroundColor White
+Write-Host "  Build (and it will be ready to be used by LLMs via MCP,,,):     ./rebuid-DocsToAI-container.ps1" -ForegroundColor White
+# Write-Host "  Add Documents:  ./docker-addfiles.ps1" -ForegroundColor White
+
 Write-Host "=" * 60 -ForegroundColor Cyan

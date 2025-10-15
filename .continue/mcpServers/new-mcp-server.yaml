@@ -1,0 +1,12 @@
+name: Doc to AI server
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: Doc to AI MCP Server in docker
+    command: docker
+    args:
+      - "run"
+      - "-i" 
+      - "--rm"
+      - "mcp/docs-to-ai"
+    env: {}

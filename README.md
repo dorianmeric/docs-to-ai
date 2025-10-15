@@ -53,7 +53,7 @@ pdfs/
 
 ```bash
 pip install -r requirements.txt  # Install dependencies:
-python add_docs_to_database.py --doc-dir ./my-docs #  Ingest PDFs
+python -m app.add_docs_to_database --doc-dir ./my-docs #  Ingest PDFs
 python mcp_server.py #  Start the MCP Server
 ```
 

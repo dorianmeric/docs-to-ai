@@ -201,7 +201,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 filter_msg = f" with topic '{topic_filter}'" if topic_filter else ""
                 return [TextContent(
                     type="text",
-                    text=f"No documents found{filter_msg}. Use add_docs_to_database.py to add documents."
+                    text=f"No documents found{filter_msg}. Use 'python -m app.add_docs_to_database' to add documents."
                 )]
             
             # Group by first topic for display
@@ -345,7 +345,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             # Run the command to scan and update documents
             try:
                 result = subprocess.run(
-                    ["python", "app/add_docs_to_database.py", "--doc-dir", "/app/docs"],
+                    ["python", "-m", "app.add_docs_to_database", "--doc-dir", "/app/docs"],
                     capture_output=True,
                     text=True,
                     check=True
