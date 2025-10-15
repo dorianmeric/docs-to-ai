@@ -15,7 +15,7 @@ services:
       # Document cache (persists extracted text)
       - ./doc_cache:/app/doc_cache
       # Documents directory (your PDFs and Word docs)
-      - ./docs:/app/docs:ro  # Read-only to prevent accidental modifications
+      - ./my-docs:/app/docs:ro  # Read-only to prevent accidental modifications
     
     # Environment variables (optional)
     environment:
@@ -53,7 +53,7 @@ services:
     volumes:
       - ./chroma_db:/app/chroma_db
       - ./doc_cache:/app/doc_cache
-      - ./docs:/app/docs:ro
+      - ./my-docs:/app/docs:ro
     
     environment:
       - PYTHONUNBUFFERED=1

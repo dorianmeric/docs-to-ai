@@ -27,7 +27,7 @@ TOPIC_SEPARATOR = " > "  # Separator for hierarchical topics in display
 SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc']  # Supported document types
 
 # ChromaDB Configuration
-CHROMA_COLLECTION_NAME = "documents"
+CHROMA_COLLECTION_NAME = "my-documents" # you can rename this collection
 
 # Create necessary directories
 CHROMA_DB_DIR.mkdir(exist_ok=True)

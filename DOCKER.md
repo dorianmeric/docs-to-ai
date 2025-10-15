@@ -19,7 +19,7 @@ This will create the `docs-to-ai:latest` image.
 
 ### 2. Add Documents to the Database
 
-Place your PDF and Word documents in the `docs/` directory, organized by topic folders:
+Place your PDF and Word documents in the `my-docs/` directory, organized by topic folders:
 
 ```
 docs/
@@ -141,7 +141,7 @@ The Docker setup uses three volumes for persistent data:
 
 1. **chroma_db/** - Vector database (ChromaDB)
 2. **doc_cache/** - Cached extracted text
-3. **docs/** - Your source documents
+3. **my-docs/** - Your source documents
 
 ### Backup Data
 

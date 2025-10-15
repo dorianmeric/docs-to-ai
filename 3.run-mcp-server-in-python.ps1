@@ -1,1 +1,1 @@
-python mcp_server.py
+python app/mcp_server.py

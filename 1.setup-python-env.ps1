@@ -1,1 +1,1 @@
-python setup.py
+python app/setup.py

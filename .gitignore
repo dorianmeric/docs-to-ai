@@ -56,8 +56,8 @@ test.pdf
 *.tmp
 
 
-docs/
+my-docs/
 
 # Docker
-.dockerignore
+# .dockerignore
 docker-compose.override.yml

@@ -1,24 +1,24 @@
 # Ingest documents into the database using Docker
 
-Write-Host "Checking if documents exist in ./docs directory..." -ForegroundColor Green
+Write-Host "Checking if documents exist in ./my-docs directory..." -ForegroundColor Green
 
-if (-not (Test-Path "./docs")) {
-    Write-Host "`nERROR: ./docs directory not found!" -ForegroundColor Red
-    Write-Host "Please create the ./docs directory and add your PDF/Word documents." -ForegroundColor Yellow
+if (-not (Test-Path "./my-docs")) {
+    Write-Host "`nERROR: ./my-docs directory not found!" -ForegroundColor Red
+    Write-Host "Please create the ./my-docs directory and add your PDF/Word documents." -ForegroundColor Yellow
     exit 1
 }
 
-$docCount = (Get-ChildItem -Path "./docs" -Recurse -Include *.pdf,*.docx,*.doc | Measure-Object).Count
+$docCount = (Get-ChildItem -Path "./my-docs" -Recurse -Include *.pdf,*.docx,*.doc | Measure-Object).Count
 
 if ($docCount -eq 0) {
-    Write-Host "`nWARNING: No PDF or Word documents found in ./docs" -ForegroundColor Yellow
-    Write-Host "Please add documents to the ./docs directory before ingesting." -ForegroundColor Yellow
+    Write-Host "`nWARNING: No PDF or Word documents found in ./my-docs" -ForegroundColor Yellow
+    Write-Host "Please add documents to the ./my-docs directory before ingesting." -ForegroundColor Yellow
     $continue = Read-Host "Continue anyway? (y/n)"
     if ($continue -ne "y") {
         exit 0
     }
 } else {
-    Write-Host "Found $docCount document(s) in ./docs" -ForegroundColor Cyan
+    Write-Host "Found $docCount document(s) in ./my-docs" -ForegroundColor Cyan
 }
 
 Write-Host "`nBuilding Docker image (if needed)..." -ForegroundColor Green

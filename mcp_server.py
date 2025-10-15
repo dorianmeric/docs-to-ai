@@ -7,12 +7,11 @@ information from a collection of documents stored in a vector database.
 """
 
 import asyncio
-import json
 from typing import Optional
 from mcp.server import Server
 from mcp.types import Tool, TextContent
-from vector_store import VectorStore
-from config import DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, TOPIC_SEPARATOR
+from app.vector_store import VectorStore
+from app.config import DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, TOPIC_SEPARATOR
 
 # Initialize server
 app = Server("docs-to-ai")

@@ -147,7 +147,7 @@ def main():
         type=str,
         required=True,
         help="Directory containing documents (organized by topic folders)",
-        default="./docs"
+        default="./my-docs"
     )
     parser.add_argument(
         "--reset",

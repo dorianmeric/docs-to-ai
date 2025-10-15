@@ -15,7 +15,7 @@ def create_directories():
     directories = [
         CHROMA_DB_DIR,
         DOC_CACHE_DIR,
-        Path("docs")  # Default documents directory
+        Path("my-docs")  # Default documents directory
     ]
     
     for directory in directories:
@@ -96,11 +96,11 @@ def print_next_steps():
     print("   - Organize PDFs and Word docs in folders by topic")
     print("   - Place documents in the 'docs' directory")
     print("   - Folder hierarchy becomes topic tags")
-    print("   - Example: docs/Project_Name/Legal_Docs/contract.pdf")
+    print("   - Example: my-docs/Project_Name/Legal_Docs/contract.pdf")
     print("     → Topics: ['Project_Name', 'Legal_Docs']")
     
     print("\n2. Ingest your documents:")
-    print("   python add_docs_to_database.py --doc-dir ./docs")
+    print("   python add_docs_to_database.py --doc-dir ./my-docs")
     
     print("\n3. Test the system:")
     print("   python test_system.py")

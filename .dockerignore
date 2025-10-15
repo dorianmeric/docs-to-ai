@@ -1,0 +1,53 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Git files
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# PowerShell scripts (used locally, not in container)
+*.ps1
+
+# Environment files
+.env
+.env.local
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+
+# Example/template files
+*.example.*
+claude_desktop_config.example.json
