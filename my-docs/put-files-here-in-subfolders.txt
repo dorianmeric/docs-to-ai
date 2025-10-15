@@ -1,0 +1,2 @@
+Put your PDFs and Word documents in this folder, organised in a tree structure of folders, such as:  my-docs/MyTransaction1/Legal my-docs/loan_agreement.pdf 
+This will auto-tag the file loan_agreement, to have the topics "MyTransaction1" and "Legal docs", which will make searching files related to a transaction easier.
