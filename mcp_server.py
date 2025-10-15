@@ -110,7 +110,8 @@ async def list_tools() -> list[Tool]:
             name="scan_my_documents",
             description=(
                 "Scan all documents in the docs directory and update the vector database. "
-                "This forces a re-indexing of all documents using the latest files."
+                "This forces a complete re-indexing: the database is cleared first to prevent duplicates, "
+                "then all documents are processed from scratch."
             ),
             inputSchema={
                 "type": "object",
@@ -122,7 +123,7 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Start watching the documents folder for changes and automatically trigger incremental updates. "
                 "Uses intelligent change detection to only process modified files. "
-                "Performs a full scan once per week and on initial startup."
+                "Performs a full scan (with database reset) once per week and on initial startup to prevent duplicates."
             ),
             inputSchema={
                 "type": "object",
@@ -154,6 +155,7 @@ async def list_tools() -> list[Tool]:
             name="force_full_scan",
             description=(
                 "Force an immediate full scan of all documents, bypassing the weekly schedule. "
+                "The database is cleared first to prevent duplicates, then all documents are reprocessed. "
                 "Useful when you want to ensure all documents are up to date."
             ),
             inputSchema={
@@ -395,13 +397,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )]
         
         elif name == "scan_my_documents":
-            # Run the full scan function directly
+            # Run the full scan function directly with database reset
             try:
                 doc_dir = "/app/docs"  # Docker path
-                add_docs_to_database(doc_dir)
+                print("[MCP] Starting full scan with database reset")
+                add_docs_to_database(doc_dir, reset_database=True)
                 return [TextContent(
                     type="text",
-                    text="✓ Successfully scanned and updated all documents"
+                    text="✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)"
                 )]
             except Exception as e:
                 return [TextContent(
@@ -422,9 +425,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                             print(f"[MCP] Processing {len(changes)} incremental changes")
                             process_incremental_changes(changes, doc_dir)
                         else:
-                            # Do a full scan
-                            print(f"[MCP] Performing full document scan")
-                            add_docs_to_database(doc_dir)
+                            # Do a full scan with database reset to prevent duplicates
+                            print(f"[MCP] Performing full document scan (resetting database)")
+                            add_docs_to_database(doc_dir, reset_database=True)
                     except Exception as e:
                         print(f"[MCP] Error during scan: {e}")
                         import traceback

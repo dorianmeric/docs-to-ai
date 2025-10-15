@@ -6,13 +6,14 @@ from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC
 import sys
 
 
-def add_docs_to_database(doc_dir: str):
+def add_docs_to_database(doc_dir: str, reset_database: bool = True):
     """
     Ingest all documents (PDFs, Word, Markdown, Excel) from a directory into the vector store.
     Uses folder structure to tag documents with hierarchical topics.
     
     Args:
         doc_dir: Directory containing documents (organized by topic folders)
+        reset_database: If True, clears the database before adding documents
     """
     doc_path = Path(doc_dir)
     
@@ -57,6 +58,12 @@ def add_docs_to_database(doc_dir: str):
     
     # Initialize store
     store = VectorStore()
+    
+    # Reset database if requested
+    if reset_database:
+        print("\n⚠ Resetting vector store (clearing all existing documents)...")
+        store.reset()
+        print("✓ Vector store reset complete\n")
     
     # Process each document
     total_chunks = 0

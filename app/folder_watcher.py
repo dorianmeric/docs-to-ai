@@ -197,14 +197,14 @@ def _check_full_scan_needed() -> bool:
 
 
 def _trigger_full_scan(callback: Callable):
-    """Trigger a full scan of all documents."""
+    """Trigger a full scan of all documents with database reset."""
     global _last_scan_start_time, _last_scan_end_time, _last_full_scan_time
     
     try:
         _last_scan_start_time = time.time()
         _last_full_scan_time = _last_scan_start_time
         
-        print(f"\n[FolderWatcher] Starting FULL SCAN at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}")
+        print(f"\n[FolderWatcher] Starting FULL SCAN (with database reset) at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}")
         
         # Execute callback with full scan flag
         if callback:
