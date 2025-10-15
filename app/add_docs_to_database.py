@@ -8,7 +8,7 @@ import sys
 
 def add_docs_to_database(doc_dir: str):
     """
-    Ingest all documents (PDFs and Word) from a directory into the vector store.
+    Ingest all documents (PDFs, Word, Markdown, Excel) from a directory into the vector store.
     Uses folder structure to tag documents with hierarchical topics.
     
     Args:
@@ -140,7 +140,7 @@ def add_docs_to_database(doc_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ingest documents (PDF, Word, Markdown) into the vector store"
+        description="Ingest documents (PDF, Word, Markdown, Excel) into the vector store"
     )
     parser.add_argument(
         "--doc-dir",

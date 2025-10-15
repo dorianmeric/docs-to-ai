@@ -23,7 +23,7 @@ DEFAULT_TOPIC = "uncategorized"  # Default topic if no folder structure
 TOPIC_SEPARATOR = " > "  # Separator for hierarchical topics in display
 
 # Document Processing Configuration
-SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md']  # Supported document types
+SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.xlsx', '.xls', '.xlsam', '.xlsb']  # Supported document types
 
 # ChromaDB Configuration
 CHROMA_COLLECTION_NAME = "my-documents" # you can rename this collection
