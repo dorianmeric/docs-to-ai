@@ -1,6 +1,7 @@
-# PDF Document Query System with MCP
+# PDF/Word Document Query System with MCP
 
-A Model Context Protocol (MCP) server that enables Claude to query your PDF documents using semantic search. Organizes documents by topics based on folder structure.
+A Model Context Protocol (MCP) server that enables Claude to query your documents using semantic search. Organizes documents by topics based on folder structure.
+Supports: PDF, Word, Excel, Markdown.
 
 ## Features
 
@@ -131,7 +132,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 ## Project Structure
 
 - `mcp_server.py` - Main MCP server implementation
-- `pdf_processor.py` - PDF text extraction and chunking
+- `document_processor.py` - PDF text extraction and chunking
 - `vector_store.py` - Vector database operations
 - `scan_all_my_documentss.py` - Batch PDF ingestion script
 - `requirements.txt` - Python dependencies

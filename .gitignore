@@ -57,3 +57,5 @@ my-docs/
 # Docker
 # .dockerignore
 docker-compose.override.yml
+
+.continue/
