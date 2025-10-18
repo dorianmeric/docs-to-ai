@@ -11,10 +11,14 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
     """
     Ingest all documents (PDFs, Word, Markdown, Excel) from a directory into the vector store.
     Uses folder structure to tag documents with hierarchical topics.
-    
+
     Args:
         doc_dir: Directory containing documents (organized by topic folders)
         reset_database: If True, clears the database before adding documents
+
+    Note:
+        Uses the singleton VectorStore instance internally, ensuring all scans
+        operate on the same vector database.
     """
 
     reset_database = True # Always reset when called, to avoid duplicates
@@ -105,7 +109,8 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
     for ext, count in sorted(filetype_count.items()):
         response_parts.append(f"\n  {ext}: {count} files")
     
-    # Initialize store
+    # Get the singleton VectorStore instance
+    # All calls to VectorStore() return the same instance
     vector_store = VectorStore()
     
     # Reset database if requested

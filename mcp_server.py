@@ -8,7 +8,6 @@ information from a collection of documents stored in a vector database.
 
 import asyncio
 import subprocess
-from typing import Optional
 import time
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -31,10 +30,6 @@ from app.scan_all_my_documents import scan_all_my_documents
 
 # Initialize server
 app = Server("docs-to-ai")
-
-# Initialize vector store
-vector_store: Optional[VectorStore] = None
-
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -163,10 +158,8 @@ async def list_tools() -> list[Tool]:
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
-    global vector_store
-    
-    if vector_store is None:
-        vector_store = VectorStore()
+    # VectorStore is a singleton - get the shared instance
+    vector_store = VectorStore()
     
     try:
         if name == "search_documents":
@@ -394,7 +387,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             # Run the full scan function directly with database reset
             try:
                 doc_dir = "/app/my-docs"  # Docker path
-                # scan_all_my_documents now returns a list[TextContent] with debug info
+                # scan_all_my_documents uses the singleton VectorStore internally
+                # Returns list[TextContent] with debug info
                 return scan_all_my_documents(doc_dir)
             except Exception as e:
                 return [TextContent(
@@ -409,6 +403,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 
                 # Create a callback function that will trigger incremental or full scans
                 # The callback returns list[TextContent] with debug info for MCP response
+                # Uses the singleton VectorStore internally
                 def scan_callback(changes, incremental):
                     try:
                         if incremental and changes:
@@ -417,14 +412,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                             return process_incremental_changes(changes, doc_dir)
                         else:
                             # Do a full scan with database reset to prevent duplicates
-                            # scan_all_my_documents returns list[TextContent]
+                            # scan_all_my_documents uses singleton VectorStore
                             return scan_all_my_documents(doc_dir)
                     except Exception as e:
                         # Return error as TextContent for MCP response
                         print(f"[MCP] Error during scan: {e}")
                         import traceback
                         traceback.print_exc()
-                        from mcp.types import TextContent
                         return [TextContent(
                             type="text",
                             text=f"✗ Error during scan: {str(e)}"
@@ -563,12 +557,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 async def startup_initialization():
     """Perform initial scan and start folder watcher on server startup based on environment variables."""
-    global vector_store
-
     try:
-        # Initialize vector store if not already done
-        if vector_store is None:
-            vector_store = VectorStore()
+        # Initialize the singleton VectorStore (will only initialize once)
+        VectorStore()
 
         print("[MCP] Starting initialization...")
         print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}")
@@ -584,6 +575,7 @@ async def startup_initialization():
             return
 
         # Create a callback function for the folder watcher
+        # Uses the singleton VectorStore internally
         def scan_callback(changes, incremental):
             try:
                 if incremental and changes:
@@ -591,6 +583,7 @@ async def startup_initialization():
                     return process_incremental_changes(changes, doc_dir)
                 else:
                     # Do a full scan with database reset
+                    # scan_all_my_documents uses singleton VectorStore
                     return scan_all_my_documents(doc_dir)
             except Exception as e:
                 print(f"[MCP] Error during scan: {e}")
@@ -616,7 +609,8 @@ async def startup_initialization():
 
                 # Log scan result summary if available
                 if FULL_SCAN_ON_BOOT and 'scan_result' in result and result['scan_result']:
-                    print(f"[MCP] ✓ Initial scan completed")
+                    print(f"[MCP] ✓ Initial scan completed. Result:")
+                    print(f"{result['scan_result']}")
             else:
                 print(f"[MCP] ⚠ Warning: Failed to start folder watcher: {result.get('message', 'Unknown error')}")
                 print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool")
@@ -629,6 +623,8 @@ async def startup_initialization():
                 print(f"[MCP] ✓ Full scan completed")
             print(f"[MCP]   Folder watcher is not active (disabled via environment variable)")
             print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool")
+
+        
 
     except Exception as e:
         print(f"[MCP] ⚠ Warning: Error during startup initialization: {e}")

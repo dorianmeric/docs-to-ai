@@ -12,10 +12,27 @@ from app.config import (
 
 
 class VectorStore:
-    """Manages vector database operations using chromadb."""
-    
+    """Manages vector database operations using chromadb.
+
+    Implemented as a Singleton to ensure only one instance exists across the application.
+    This prevents multiple instances from creating separate database connections.
+    """
+
+    _instance = None
+    _initialized = False
+
+    def __new__(cls):
+        """Singleton pattern: always return the same instance."""
+        if cls._instance is None:
+            cls._instance = super(VectorStore, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self):
-        
+        """Initialize the vector store (only runs once due to singleton pattern)."""
+        # Only initialize once
+        if VectorStore._initialized:
+            return
+
         CHROMADB_DIR.mkdir(exist_ok=True, parents=True) # create the folder if it doesn't exist yet
 
         # Initialize chromadb client with persistence
@@ -26,18 +43,21 @@ class VectorStore:
                 allow_reset=True
             )
         )
-        
+
         # Initialize embedding model
         # print(f"Loading embedding model: {EMBEDDING_MODEL}")
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-        
+
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
             name=CHROMA_COLLECTION_NAME,
             metadata={"description": "Document chunks with hierarchical topics"}
         )
-        
+
         # print(f"Vector store initialized. Documents in collection: {self.collection.count()}")
+
+        # Mark as initialized
+        VectorStore._initialized = True
     
     def add_documents(self, chunks: List[Dict[str, any]]) -> int:
         """

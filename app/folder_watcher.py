@@ -242,7 +242,7 @@ def _trigger_full_scan(callback: Callable):
 
 def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = None,
                          debounce_seconds: int = DEBOUNCE_SECONDS,
-                         do_initial_scan: bool = True):
+                         do_initial_scan: bool = False):
     """
     Start watching a folder for changes with incremental update support.
 

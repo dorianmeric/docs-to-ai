@@ -12,10 +12,16 @@ import time
 
 
 class IncrementalUpdater:
-    """Handles incremental updates to the vector store."""
+    """Handles incremental updates to the vector store.
+
+    Note:
+        Uses the singleton VectorStore instance, ensuring all incremental updates
+        operate on the same vector database as full scans and searches.
+    """
 
     def __init__(self):
         self.processor = DocumentProcessor()
+        # Get the singleton VectorStore instance
         self.store = VectorStore()
         self.debug_messages = []
     
