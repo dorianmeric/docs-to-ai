@@ -29,20 +29,58 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
             type="text",
             text="\n".join(response_parts)
         )]
+
+    # Debug: Check if directory is readable
+    response_parts.append(f"Scanning directory: {doc_path.absolute()}")
+    response_parts.append(f"Directory exists: {doc_path.exists()}")
+    response_parts.append(f"Directory is readable: {doc_path.is_dir()}")
+
+    # Debug: List all files in directory (first level)
+    try:
+        all_items = list(doc_path.iterdir())
+        response_parts.append(f"Total items in directory: {len(all_items)}")
+        files = [f for f in all_items if f.is_file()]
+        dirs = [d for d in all_items if d.is_dir()]
+        response_parts.append(f"  Files: {len(files)}, Directories: {len(dirs)}")
+        if files:
+            response_parts.append(f"  Sample files: {[f.name for f in files[:5]]}")
+    except Exception as e:
+        response_parts.append(f"  Warning: Could not list directory contents: {e}")
     
-    # Find all supported documents
+    # Find all supported documents (case-insensitive)
     doc_files = []
     for ext in SUPPORTED_EXTENSIONS:
-        doc_files.extend(list(doc_path.rglob(f"*{ext}")))
-    
+        # Find both lowercase and uppercase variants
+        # e.g., .pdf, .PDF, .Pdf, etc.
+        doc_files.extend(list(doc_path.rglob(f"*{ext}")))  # lowercase
+        doc_files.extend(list(doc_path.rglob(f"*{ext.upper()}")))  # uppercase
+        # Also handle mixed case like .Pdf, .Doc, etc.
+        if len(ext) > 1:
+            # Capitalize first letter after dot: .Pdf, .Docx, etc.
+            mixed_case = ext[0] + ext[1].upper() + ext[2:].lower()
+            doc_files.extend(list(doc_path.rglob(f"*{mixed_case}")))
+
+    # Remove duplicates (in case same file matched multiple patterns)
+    doc_files = list(set(doc_files))
+
+    # Debug: Show what extensions were found
+    response_parts.append(f"\nSearched for extensions: {', '.join(SUPPORTED_EXTENSIONS)}")
+    response_parts.append(f"Found {len(doc_files)} matching document(s)")
+
     if not doc_files:
-        response_parts.append(f"No supported documents found in {doc_dir}. Add documents and scan again.")
+        response_parts.append(f"\n⚠ No supported documents found in {doc_dir}.")
+        response_parts.append(f"Supported extensions: {', '.join(SUPPORTED_EXTENSIONS)} (case-insensitive)")
+        response_parts.append(f"Please add documents to {doc_path.absolute()} and scan again.")
         return [TextContent(
             type="text",
             text="\n".join(response_parts)
         )]
 
-    response_parts.append(f"Found {len(doc_files)} document files, in Base directory: {doc_path}\n")
+    response_parts.append(f"\n{'='*60}")
+    response_parts.append(f"DOCUMENT SCAN STARTING")
+    response_parts.append(f"{'='*60}")
+    response_parts.append(f"Base directory: {doc_path}")
+    response_parts.append(f"Total documents found: {len(doc_files)}\n")
 
 
     # Analyze folder structure and topics
