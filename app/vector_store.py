@@ -15,6 +15,9 @@ class VectorStore:
     """Manages vector database operations using chromadb."""
     
     def __init__(self):
+        
+        CHROMADB_DIR.mkdir(exist_ok=True, parents=True) # create the folder if it doesn't exist yet
+
         # Initialize chromadb client with persistence
         self.client = chromadb.PersistentClient(
             path=str(CHROMADB_DIR),

@@ -1,14 +1,9 @@
-# Build and start the docs-to-ai Docker container
+#!/usr/bin/env bash
 
 Write-Host "Building docs-to-ai Docker image..." -ForegroundColor Green
-# Default UID/GID for Windows (since it doesn't use Unix IDs)
-if (wsl -e id -u 2>$null) {
-  $env:MY_UID = wsl -e id -u
-  $env:MY_GID = wsl -e id -g
-} else {
-  $env:MY_UID = 1000
-  $env:MY_GID = 1000
-}
+
+export MY_UID=$(id -u)
+export MY_GID=$(id -g)
 
 docker-compose build
 

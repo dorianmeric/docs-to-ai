@@ -5,37 +5,38 @@ services:
       dockerfile: Dockerfile
     container_name: docs-to-ai
     image: mcp/docs-to-ai
-    
+
     # Volumes for persistent data
     volumes:
-      # chromadb database (persists the vector store)
-      - ./cache/chromadb:/app/cache/chromadb
-      # Document cache (persists extracted text)
-      - ./cache/doc_cache:/app/cache/doc_cache
-      # Documents directory (your PDFs and Word docs)
-      - ./my-docs:/app/my-docs:ro  # Read-only to prevent accidental modifications
-    
+      - ./cache/chromadb:/app/cache/chromadb # chromadb database (persists the vector store)
+      - ./cache/doc_cache:/app/cache/doc_cache # Document cache (persists extracted text)
+      - ./my-docs:/app/my-docs:ro  # Documents directory (your PDFs and Word docs)# Read-only to prevent accidental modifications
+
     # Environment variables (optional)
     environment:
       - PYTHONUNBUFFERED=1
       - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      # Startup behavior control (defaults to True if not set)
+      - FULL_SCAN_ON_BOOT=${FULL_SCAN_ON_BOOT:-True}
+      - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}
+        
+    # Stdin/stdout for MCP protocol
+    stdin_open: true
+    tty: true
     
     # Restart policy
     restart: unless-stopped
     
     # Resource limits (optional - adjust based on your needs)
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 2G
-    
-    # Stdin/stdout for MCP protocol
-    stdin_open: true
-    tty: true
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 2G
+
     
     # Command can be overridden
     # command: python mcp_server.py

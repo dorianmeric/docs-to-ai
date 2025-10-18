@@ -370,12 +370,16 @@ class DocumentProcessor:
         return chunks
     
     def clear_document_cache(self):
-        """Clear all cached document extractions."""
+        """Clear all cached document extractions (deletes contents, keeps folder)."""
         import shutil
         if self.cache_dir.exists():
-            shutil.rmtree(self.cache_dir)
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            print("Document cache cleared")
+            # Delete all files and subdirectories inside the cache folder
+            for item in self.cache_dir.iterdir():
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            print("Document cache cleared (contents deleted, folder preserved)")
     
     def _get_cache_path(self, doc_path: Path) -> Path:
         """Generate cache file path for a document."""

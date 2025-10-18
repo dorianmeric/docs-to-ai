@@ -35,8 +35,15 @@ COPY --chown=appuser:appuser app/*.py ./app/
 COPY --chown=appuser:appuser LICENSE ./
 COPY --chown=appuser:appuser README.md ./
 
+# Copy entrypoint script and ensure Unix line endings (important for Windows)
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && \
+    # Convert Windows line endings (CRLF) to Unix (LF) if present
+    sed -i 's/\r$//' /entrypoint.sh || true
+
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/cache/chromadb /app/cache/doc_cache /app/my-docs && chown -R appuser:appuser /app
+RUN mkdir -p /app/cache/chromadb /app/cache/doc_cache /app/my-docs && \
+    chown -R appuser:appuser /app/cache /app/my-docs
 
 # Switch to non-root user
 USER appuser
@@ -50,6 +57,9 @@ ENV PYTHONUNBUFFERED=1
 
 # Health check (optional - checks if Python imports work)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD python -c "import mcp, chromadb, sentence_transformers" || exit 1
+
+# Use entrypoint to handle directory creation
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Default command: run the MCP server
 CMD ["python", "mcp_server.py"]
