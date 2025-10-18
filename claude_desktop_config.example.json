@@ -1,8 +1,17 @@
 {
   "mcpServers": {
+
+
     "docs-to-ai": {
-      "command": "python",
-      "args": ["C:/D/code/ai-tools/Claude-Controlled/docs-to-ai/mcp_server.py"]
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+		    "--rm",
+        "mcp/docs-to-ai"
+      ]
     }
+
+    
   }
 }

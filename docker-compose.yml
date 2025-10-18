@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: docs-to-ai-mcp
+    container_name: docs-to-ai
     image: mcp/docs-to-ai
     
     # Volumes for persistent data
@@ -39,29 +39,3 @@ services:
     
     # Command can be overridden
     # command: python mcp_server.py
-
-  # Optional: Service to run document ingestion
-  # docs-addfiles:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: docs-to-ai-addfiles
-  #   image: mcp/docs-to-ai
-    
-  #   volumes:
-  #     - ./chroma_db:/app/chroma_db
-  #     - ./doc_cache:/app/doc_cache
-  #     - ./my-docs:/app/docs:ro
-    
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-    
-  #   # Override command to run ingestion script
-  #   command: python -m app.scan_all_my_documents --doc-dir /app/docs
-    
-  #   # Run once and exit
-  #   restart: "no"
-    
-  #   # Only start this service manually with: docker-compose up docs-ingestion
-  #   profiles:
-  #     - addfiles

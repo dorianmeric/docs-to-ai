@@ -160,7 +160,7 @@ def main():
     parser.add_argument(
         "--doc-dir",
         type=str,
-        required=True,
+        required=False,
         help="Directory containing documents (organized by topic folders)",
         default="./my-docs"
     )

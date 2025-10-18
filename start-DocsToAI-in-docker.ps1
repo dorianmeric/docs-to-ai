@@ -6,7 +6,7 @@ docker-compose build
 if ($LASTEXITCODE -eq 0) {
     Write-Host "`nBuild successful!" -ForegroundColor Green
     Write-Host "`nStarting MCP server in detached mode..." -ForegroundColor Green
-    docker-compose up -d docs-to-ai
+    docker-compose up -d
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`nContainer started successfully!" -ForegroundColor Green

@@ -121,6 +121,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
       "args": [
         "run",
         "-i",
+        "--rm",
         "mcp/docs-to-ai"
       ]
     }

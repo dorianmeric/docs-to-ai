@@ -388,7 +388,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             # Run the full scan function directly with database reset
             try:
                 doc_dir = "/app/docs"  # Docker path
-                print("[MCP] Starting full scan with database reset")
+                # print("[MCP] Starting full scan with database reset")
                 scan_all_my_documents(doc_dir)
                 return [TextContent(
                     type="text",
@@ -410,11 +410,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     try:
                         if incremental and changes:
                             # Process only the changed files
-                            print(f"[MCP] Processing {len(changes)} incremental changes")
+                            # print(f"[MCP] Processing {len(changes)} incremental changes")
                             process_incremental_changes(changes, doc_dir)
                         else:
                             # Do a full scan with database reset to prevent duplicates
-                            print(f"[MCP] Performing full document scan (resetting database)")
+                            # print(f"[MCP] Performing full document scan (resetting database)")
                             scan_all_my_documents(doc_dir)
                     except Exception as e:
                         print(f"[MCP] Error during scan: {e}")
