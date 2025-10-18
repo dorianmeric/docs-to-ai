@@ -1,7 +1,10 @@
 # PDF/Word Document Query System with MCP
 
-A Model Context Protocol (MCP) server that enables Claude to query your documents using semantic search. Organizes documents by topics based on folder structure.
+A Model Context Protocol (MCP) server that enables LLMs (like Clause or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
 Supports: PDF, Word, Excel, Markdown.
+Supported extensions: .pdf, .docx, .doc, .xlsx, .xls, .xlsam, .xlsb, .md
+
+The model used for document retrieval is all-MiniLM-L6-v2, with 384 dimensions for the embeddings.
 
 ## Features
 
@@ -106,9 +109,39 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 
 ## 2. Installation, with docker
 You need Docker Desktop, or Docker Engine, running. Then just:
-```bash
-./start-DocsToAI-in-docker.ps1  # builds and run the image, with docker-compose
-```
+````yaml
+services:
+  docs-to-ai:
+    image: dmeric/docs-to-ai
+    container_name: docs-to-ai
+    image: mcp/docs-to-ai
+    
+    volumes:
+      # ChromaDB database (persists the vector store)
+      - ./cache/chromadb:/app/chroma_db
+      # Document cache (persists extracted text)
+      - ./cache/doc_cache:/app/doc_cache
+      # Documents directory (your PDFs and Word docs)
+      - ./my-docs:/my-docs:ro  # Read-only to prevent accidental modifications
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional - adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    
+    # Stdin/stdout for MCP protocol
+    stdin_open: true
+    tty: true
+    
+````
 
 Add to your Claude Desktop config (`claude_desktop_config.json`):
 
