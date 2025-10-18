@@ -114,7 +114,6 @@ services:
   docs-to-ai:
     image: dmeric/docs-to-ai
     container_name: docs-to-ai
-    image: mcp/docs-to-ai
     
     volumes:
       # ChromaDB database (persists the vector store)
