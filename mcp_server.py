@@ -1,10 +1,8 @@
-                "type": "object",
-                "properties": {}
 #!/usr/bin/env python3
-        ),
 """
 MCP Server for querying documents (PDFs and Word docs).
 
+This server exposes tools that allow Claude to search and retrieve
 information from a collection of documents stored in a vector database.
 """
 
@@ -395,9 +393,161 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 return [TextContent(
                     type="text",
                     text="✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)"
+                )]
+            except Exception as e:
+                return [TextContent(
+                    type="text",
+                    text=f"✗ Error scanning documents: {str(e)}"
+                )]
+            
+        elif name == "start_watching_folder":
+            try:
+                # Define the base directory for documents
+                doc_dir = "/app/docs"  # Docker path, adjust if needed
+                
+                # Create a callback function that will trigger incremental or full scans
+                def scan_callback(changes, incremental):
+                    try:
+                        if incremental and changes:
+                            # Process only the changed files
+                            print(f"[MCP] Processing {len(changes)} incremental changes")
+                            process_incremental_changes(changes, doc_dir)
+                        else:
+                            # Do a full scan with database reset to prevent duplicates
+                            print(f"[MCP] Performing full document scan (resetting database)")
+                            scan_all_my_documents(doc_dir)
+                    except Exception as e:
+                        print(f"[MCP] Error during scan: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                # Start watching the folder with initial scan
+                result = start_watching_folder(scan_callback, do_initial_scan=True)
+                
+                if result['status'] == 'started':
+                    return [TextContent(
+                        type="text",
+                        text=f"✓ Folder watcher started successfully\n\nWatching: {result['watch_path']}\nDebounce: {result['debounce_seconds']} seconds\nFull scan interval: {result['full_scan_interval_days']} days\nMode: Incremental updates enabled"
+                    )]
+                elif result['status'] == 'already_watching':
+                    return [TextContent(
+                        type="text",
+                        text=f"ℹ Folder watcher is already active\n\nWatching: {result['watch_path']}"
+                    )]
+                else:
+                    return [TextContent(
+                        type="text",
+                        text=f"✗ Failed to start folder watcher\n\nError: {result.get('message', 'Unknown error')}"
+                    )]
+            except Exception as e:
+                return [TextContent(
+                    type="text",
+                    text=f"✗ Error starting folder watcher: {str(e)}"
+                )]
+        
+        elif name == "stop_watching_folder":
+            try:
+                result = stop_watching_folder()
+                
+                if result['status'] == 'stopped':
+                    return [TextContent(
+                        type="text",
+                        text="✓ Folder watcher stopped successfully"
+                    )]
+                elif result['status'] == 'not_watching':
+                    return [TextContent(
+                        type="text",
+                        text="ℹ Folder watcher is not currently active"
+                    )]
+                else:
+                    return [TextContent(
+                        type="text",
+                        text=f"✗ Error stopping folder watcher: {result.get('message', 'Unknown error')}"
+                    )]
+            except Exception as e:
+                return [TextContent(
+                    type="text",
+                    text=f"✗ Error stopping folder watcher: {str(e)}"
+                )]
+        
+        elif name == "get_time_of_last_folder_scan":
+            try:
+                result = get_last_scan_time()
+                
+                if result["status"] == "success":
+                    response_parts = ["Last Folder Scan Information:\n"]
+                    response_parts.append(f"Started:  {result['scan_start_time_formatted']}")
+                    
+                    if 'scan_end_time_formatted' in result:
+                        response_parts.append(f"Finished: {result['scan_end_time_formatted']}")
+                        response_parts.append(f"Duration: {result['duration_seconds']} seconds")
+                    else:
+                        response_parts.append("Status: Scan in progress...")
+                    
+                    # Add full scan info
+                    if 'last_full_scan_time_formatted' in result:
+                        response_parts.append(f"\nLast Full Scan: {result['last_full_scan_time_formatted']}")
+                        response_parts.append(f"Days since full scan: {result['days_since_full_scan']}")
+                        if result.get('next_full_scan_due'):
+                            response_parts.append("Next full scan: DUE NOW")
+                        else:
+                            days_remaining = 7 - result['days_since_full_scan']
+                            response_parts.append(f"Next full scan in: {days_remaining} days")
+                    
+                    return [TextContent(
+                        type="text",
+                        text="\n".join(response_parts)
+                    )]
+                elif result["status"] == "not_watching":
+                    return [TextContent(
+                        type="text",
+                        text="ℹ Folder watcher is not currently active"
+                    )]
+                elif result["status"] == "no_scans_yet":
+                    return [TextContent(
+                        type="text",
+                        text="ℹ Folder watcher is active but no scans have been triggered yet"
+                    )]
+                else:
+                    return [TextContent(
+                        type="text",
+                        text=f"✗ Error: {result.get('message', 'Unknown error')}"
+                    )]
+            except Exception as e:
+                return [TextContent(
+                    type="text",
+                    text=f"✗ Error getting last scan time: {str(e)}"
+                )]
+        
+
+
+        else:
+            return [TextContent(
+                type="text",
+                text=f"Unknown tool: {name}"
+            )]
+    
+    except Exception as e:
+        return [TextContent(
+            type="text",
+            text=f"Error executing tool {name}: {str(e)}"
+        )]
+
+
+async def main():
+    """Run the MCP server."""
+    from mcp.server.stdio import stdio_server
+    
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(
+            read_stream,
+            write_stream,
+            app.create_initialization_options()
+        )
 
     print("mcp_server.py -- MCP server is shutting down.")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
