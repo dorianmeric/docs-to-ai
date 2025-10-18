@@ -21,9 +21,14 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
 
     doc_path = Path(doc_dir)
     
+    response_parts = []
+
     if not doc_path.exists():
         response_parts.append(f"Error: Directory {doc_dir} does not exist")
-        sys.exit(1)
+        return [TextContent(
+            type="text",
+            text="\n".join(response_parts)
+        )]
     
     # Find all supported documents
     doc_files = []
@@ -31,14 +36,13 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
         doc_files.extend(list(doc_path.rglob(f"*{ext}")))
     
     if not doc_files:
+        response_parts.append(f"No supported documents found in {doc_dir}. Add documents and scan again.")
+        return [TextContent(
+            type="text",
+            text="\n".join(response_parts)
+        )]
 
-        response_parts.append([TextContent(
-                    type="text",
-                    text=f"No supported documents found in {doc_dir}. Add documents and scan again."
-                )])
-        sys.exit(0)
-    
-    response_parts = [f"Found {len(doc_files)} document files, in Base directory: {doc_path}\n"]
+    response_parts.append(f"Found {len(doc_files)} document files, in Base directory: {doc_path}\n")
 
 
     # Analyze folder structure and topics

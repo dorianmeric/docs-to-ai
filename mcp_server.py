@@ -13,7 +13,13 @@ import time
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from app.vector_store import VectorStore
-from app.config import DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, TOPIC_SEPARATOR
+from app.config import (
+    DEFAULT_SEARCH_RESULTS,
+    MAX_SEARCH_RESULTS,
+    TOPIC_SEPARATOR,
+    FULL_SCAN_ON_BOOT,
+    FOLDER_WATCHER_ACTIVE_ON_BOOT
+)
 from app.folder_watcher import (
     start_watching_folder, 
     stop_watching_folder, 
@@ -388,12 +394,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             # Run the full scan function directly with database reset
             try:
                 doc_dir = "/app/docs"  # Docker path
-                # print("[MCP] Starting full scan with database reset")
+                # scan_all_my_documents now returns a list[TextContent] with debug info
                 return scan_all_my_documents(doc_dir)
-                return [TextContent(
-                    type="text",
-                    text="✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)"
-                )]
             except Exception as e:
                 return [TextContent(
                     type="text",
@@ -406,33 +408,58 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 doc_dir = "/app/docs"  # Docker path, adjust if needed
                 
                 # Create a callback function that will trigger incremental or full scans
+                # The callback returns list[TextContent] with debug info for MCP response
                 def scan_callback(changes, incremental):
                     try:
                         if incremental and changes:
                             # Process only the changed files
-                            # print(f"[MCP] Processing {len(changes)} incremental changes")
+                            # process_incremental_changes returns list[TextContent]
                             return process_incremental_changes(changes, doc_dir)
                         else:
                             # Do a full scan with database reset to prevent duplicates
-                            # print(f"[MCP] Performing full document scan (resetting database)")
+                            # scan_all_my_documents returns list[TextContent]
                             return scan_all_my_documents(doc_dir)
                     except Exception as e:
+                        # Return error as TextContent for MCP response
                         print(f"[MCP] Error during scan: {e}")
                         import traceback
                         traceback.print_exc()
+                        from mcp.types import TextContent
+                        return [TextContent(
+                            type="text",
+                            text=f"✗ Error during scan: {str(e)}"
+                        )]
                 
                 # Start watching the folder with initial scan
                 result = start_watching_folder(scan_callback, do_initial_scan=True)
-                
+
                 if result['status'] == 'started':
+                    # Build response with watcher info
+                    response_parts = []
+                    response_parts.append("✓ Folder watcher started successfully\n")
+                    response_parts.append(f"Watching: {result['watch_path']}")
+                    response_parts.append(f"Debounce: {result['debounce_seconds']} seconds")
+                    response_parts.append(f"Full scan interval: {result['full_scan_interval_days']} days")
+                    response_parts.append("Mode: Incremental updates enabled")
+
+                    # If initial scan was performed, include its results
+                    if 'scan_result' in result and result['scan_result']:
+                        response_parts.append("\n" + "="*60)
+                        response_parts.append("INITIAL SCAN RESULTS:")
+                        response_parts.append("="*60)
+                        # scan_result is list[TextContent], extract the text
+                        for content in result['scan_result']:
+                            if hasattr(content, 'text'):
+                                response_parts.append(content.text)
+
                     return [TextContent(
                         type="text",
-                        text=f"✓ Folder watcher started successfully\n\nWatching: {result['watch_path']}\nDebounce: {result['debounce_seconds']} seconds\nFull scan interval: {result['full_scan_interval_days']} days\nMode: Incremental updates enabled"
+                        text="\n".join(response_parts)
                     )]
                 elif result['status'] == 'already_watching':
                     return [TextContent(
                         type="text",
-                        text=f"ℹ Folder watcher is already active\n\nWatching: {result['watch_path']}"
+                        text=f"ℹ Folder watcher is already active (started automatically on server startup)\n\nWatching: {result['watch_path']}"
                     )]
                 else:
                     return [TextContent(
@@ -534,10 +561,90 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         )]
 
 
+async def startup_initialization():
+    """Perform initial scan and start folder watcher on server startup based on environment variables."""
+    global vector_store
+
+    try:
+        # Initialize vector store if not already done
+        if vector_store is None:
+            vector_store = VectorStore()
+
+        print("[MCP] Starting initialization...")
+        print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}")
+        print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}")
+
+        doc_dir = "/app/docs"  # Docker path
+
+        # Check if we should do anything on boot
+        if not FULL_SCAN_ON_BOOT and not FOLDER_WATCHER_ACTIVE_ON_BOOT:
+            print("[MCP] ℹ Skipping startup scan and folder watcher (disabled via environment variables)")
+            print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool")
+            print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool")
+            return
+
+        # Create a callback function for the folder watcher
+        def scan_callback(changes, incremental):
+            try:
+                if incremental and changes:
+                    # Process only the changed files
+                    return process_incremental_changes(changes, doc_dir)
+                else:
+                    # Do a full scan with database reset
+                    return scan_all_my_documents(doc_dir)
+            except Exception as e:
+                print(f"[MCP] Error during scan: {e}")
+                import traceback
+                traceback.print_exc()
+                from mcp.types import TextContent
+                return [TextContent(
+                    type="text",
+                    text=f"✗ Error during scan: {str(e)}"
+                )]
+
+        # Handle different combinations of environment variables
+        if FOLDER_WATCHER_ACTIVE_ON_BOOT:
+            # Start folder watcher with or without initial scan
+            print(f"[MCP] Starting folder watcher (initial scan: {FULL_SCAN_ON_BOOT})...")
+            result = start_watching_folder(scan_callback, do_initial_scan=FULL_SCAN_ON_BOOT)
+
+            if result['status'] == 'started':
+                print(f"[MCP] ✓ Folder watcher started successfully")
+                print(f"[MCP]   Watching: {result['watch_path']}")
+                print(f"[MCP]   Debounce: {result['debounce_seconds']} seconds")
+                print(f"[MCP]   Full scan interval: {result['full_scan_interval_days']} days")
+
+                # Log scan result summary if available
+                if FULL_SCAN_ON_BOOT and 'scan_result' in result and result['scan_result']:
+                    print(f"[MCP] ✓ Initial scan completed")
+            else:
+                print(f"[MCP] ⚠ Warning: Failed to start folder watcher: {result.get('message', 'Unknown error')}")
+                print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool")
+
+        elif FULL_SCAN_ON_BOOT:
+            # Only do a full scan without starting the watcher
+            print("[MCP] Performing full scan (folder watcher disabled)...")
+            scan_result = scan_all_my_documents(doc_dir)
+            if scan_result:
+                print(f"[MCP] ✓ Full scan completed")
+            print(f"[MCP]   Folder watcher is not active (disabled via environment variable)")
+            print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool")
+
+    except Exception as e:
+        print(f"[MCP] ⚠ Warning: Error during startup initialization: {e}")
+        print(f"[MCP]   The server will continue, but automatic scanning/watching may not be active")
+        print(f"[MCP]   You can manually start features using the available tools")
+        import traceback
+        traceback.print_exc()
+
+
 async def main():
     """Run the MCP server."""
     from mcp.server.stdio import stdio_server
-    
+
+    # Perform startup initialization
+    await startup_initialization()
+
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,
@@ -546,6 +653,13 @@ async def main():
         )
 
     print("mcp_server.py -- MCP server is shutting down.")
+
+    # Stop folder watcher on shutdown
+    try:
+        stop_watching_folder()
+        print("[MCP] Folder watcher stopped")
+    except Exception as e:
+        print(f"[MCP] Error stopping folder watcher: {e}")
 
 
 if __name__ == "__main__":

@@ -7,15 +7,17 @@ from typing import List, Tuple
 from app.document_processor import DocumentProcessor
 from app.vector_store import VectorStore
 from app.config import TOPIC_SEPARATOR
+from mcp.types import TextContent
 import time
 
 
 class IncrementalUpdater:
     """Handles incremental updates to the vector store."""
-    
+
     def __init__(self):
         self.processor = DocumentProcessor()
         self.store = VectorStore()
+        self.debug_messages = []
     
     def process_changes(self, changes: List[Tuple[str, str]], base_dir: str) -> dict:
         """
@@ -81,9 +83,9 @@ class IncrementalUpdater:
                         })
                     else:
                         stats['failed'] += 1
-                        
+
             except Exception as e:
-                print(f"  ✗ Error processing {action} for {file_path}: {e}")
+                self.debug_messages.append(f"  ✗ Error processing {action} for {file_path}: {e}")
                 stats['failed'] += 1
                 stats['files_processed'].append({
                     'action': f'{action}_failed',
@@ -113,35 +115,38 @@ class IncrementalUpdater:
         try:
             # Check if file exists
             if not file_path.exists():
-                print(f"  ⚠ File no longer exists: {file_path}")
+                self.debug_messages.append(f"  ⚠ File no longer exists: {file_path}")
                 return result
-            
+
             # Extract topics for display
             topics = self.processor.extract_topics_from_path(file_path, base_path)
             topics_display = TOPIC_SEPARATOR.join(topics)
             ext = file_path.suffix.lower()
-            
-            print(f"  Processing: {file_path.name}")
-            print(f"    Type: {ext}")
-            print(f"    Topics: {topics_display}")
-            
+
+            self.debug_messages.append(f"  Processing: {file_path.name}")
+            self.debug_messages.append(f"    Type: {ext}")
+            self.debug_messages.append(f"    Topics: {topics_display}")
+
             # Process document
             chunks = self.processor.process_document(str(file_path), str(base_path))
-            
+
             if chunks:
                 # Add to vector store
                 num_added = self.store.add_documents(chunks)
                 result['chunks_added'] = num_added
                 result['success'] = True
                 result['topics'] = topics
-                print(f"    ✓ Added {num_added} chunks")
+                self.debug_messages.append(f"    ✓ Added {num_added} chunks")
             else:
-                print(f"    ⚠ No text extracted from {file_path.name}")
-                
+                self.debug_messages.append(f"    ⚠ No text extracted from {file_path.name}")
+
         except Exception as e:
-            print(f"    ✗ Error: {e}")
+            self.debug_messages.append(f"    ✗ Error: {e}")
             import traceback
-            traceback.print_exc()
+            import io
+            error_io = io.StringIO()
+            traceback.print_exc(file=error_io)
+            self.debug_messages.append(error_io.getvalue())
         
         return result
     
@@ -165,76 +170,95 @@ class IncrementalUpdater:
             chunks_deleted = self.store.delete_document(str(file_path))
             result['chunks_deleted'] = chunks_deleted
             result['success'] = True
-            
+
             if chunks_deleted > 0:
-                print(f"  ✓ Deleted {chunks_deleted} chunks from {file_path.name}")
+                self.debug_messages.append(f"  ✓ Deleted {chunks_deleted} chunks from {file_path.name}")
             else:
-                print(f"  ℹ No chunks found for {file_path.name} (may have already been deleted)")
-                
+                self.debug_messages.append(f"  ℹ No chunks found for {file_path.name} (may have already been deleted)")
+
         except Exception as e:
-            print(f"  ✗ Error deleting {file_path}: {e}")
+            self.debug_messages.append(f"  ✗ Error deleting {file_path}: {e}")
         
         return result
     
-    def print_summary(self, stats: dict):
+    def get_summary(self, stats: dict) -> list:
         """
-        Print a summary of the incremental update.
-        
+        Get a summary of the incremental update as a list of message lines.
+
         Args:
             stats: Statistics dictionary from process_changes
+
+        Returns:
+            list: List of summary message lines
         """
-        print("\n" + "="*60)
-        print("INCREMENTAL UPDATE SUMMARY")
-        print("="*60)
-        print(f"Files added:   {stats['added']}")
-        print(f"Files updated: {stats['updated']}")
-        print(f"Files deleted: {stats['deleted']}")
-        print(f"Files failed:  {stats['failed']}")
-        print(f"Chunks added:   {stats['total_chunks_added']}")
-        print(f"Chunks deleted: {stats['total_chunks_deleted']}")
-        print(f"Net change:     {stats['total_chunks_added'] - stats['total_chunks_deleted']:+d} chunks")
-        
+        summary = []
+        summary.append("\n" + "="*60)
+        summary.append("INCREMENTAL UPDATE SUMMARY")
+        summary.append("="*60)
+        summary.append(f"Files added:   {stats['added']}")
+        summary.append(f"Files updated: {stats['updated']}")
+        summary.append(f"Files deleted: {stats['deleted']}")
+        summary.append(f"Files failed:  {stats['failed']}")
+        summary.append(f"Chunks added:   {stats['total_chunks_added']}")
+        summary.append(f"Chunks deleted: {stats['total_chunks_deleted']}")
+        summary.append(f"Net change:     {stats['total_chunks_added'] - stats['total_chunks_deleted']:+d} chunks")
+
         # Get current store stats
         store_stats = self.store.get_stats()
-        print(f"\nCurrent vector store:")
-        print(f"  Total chunks:    {store_stats['total_chunks']}")
-        print(f"  Total documents: {store_stats['total_documents']}")
-        print(f"  Total topics:    {store_stats['total_topics']}")
+        summary.append(f"\nCurrent vector store:")
+        summary.append(f"  Total chunks:    {store_stats['total_chunks']}")
+        summary.append(f"  Total documents: {store_stats['total_documents']}")
+        summary.append(f"  Total topics:    {store_stats['total_topics']}")
+
+        return summary
 
 
 def process_incremental_changes(changes: List[Tuple[str, str]], doc_dir: str):
     """
-    Process incremental file changes.
-    
+    Process incremental file changes and return results via JSON-RPC.
+
     Args:
         changes: List of (action, filepath) tuples
         doc_dir: Base directory for documents
+
+    Returns:
+        list[TextContent]: MCP response with debug info
     """
     start_time = time.time()
-    
-    print("\n" + "="*60)
-    print("INCREMENTAL UPDATE")
-    print("="*60)
-    print(f"Processing {len(changes)} file change(s)...")
-    
+
+    response_parts = []
+    response_parts.append("\n" + "="*60)
+    response_parts.append("INCREMENTAL UPDATE")
+    response_parts.append("="*60)
+    response_parts.append(f"Processing {len(changes)} file change(s)...")
+
     # Count changes by type
     change_counts = {}
     for action, _ in changes:
         change_counts[action] = change_counts.get(action, 0) + 1
-    
+
     for action, count in sorted(change_counts.items()):
-        print(f"  {action}: {count} file(s)")
-    
+        response_parts.append(f"  {action}: {count} file(s)")
+
     # Process changes
     updater = IncrementalUpdater()
     stats = updater.process_changes(changes, doc_dir)
-    
-    # Print summary
-    updater.print_summary(stats)
-    
+
+    # Collect debug messages
+    response_parts.extend(updater.debug_messages)
+
+    # Get summary
+    summary = updater.get_summary(stats)
+    response_parts.extend(summary)
+
     duration = time.time() - start_time
-    print(f"\nUpdate completed in {duration:.2f} seconds")
-    print("="*60)
+    response_parts.append(f"\nUpdate completed in {duration:.2f} seconds")
+    response_parts.append("="*60)
+
+    return [TextContent(
+        type="text",
+        text="\n".join(response_parts)
+    )]
 
 
 if __name__ == "__main__":

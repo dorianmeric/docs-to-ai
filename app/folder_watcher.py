@@ -66,40 +66,44 @@ class IncrementalChangeHandler(FileSystemEventHandler):
     def _execute_update(self):
         """Execute the incremental update for all pending changes."""
         global _last_scan_start_time, _last_scan_end_time
-        
+
         with self.lock:
             if not self.pending_changes:
                 return
-            
+
             # Copy and clear pending changes
             changes_to_process = list(self.pending_changes)
             self.pending_changes.clear()
             self.timer = None
-        
+
         try:
             _last_scan_start_time = time.time()
+            # Note: These print statements are for server-side logging only
+            # The actual results are returned via the callback's JSON-RPC response
             print(f"\n[FolderWatcher] Starting incremental update at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}")
             print(f"[FolderWatcher] Processing {len(changes_to_process)} file change(s)")
-            
+
             # Group changes by action
             changes_by_action = {}
             for action, filepath in changes_to_process:
                 if action not in changes_by_action:
                     changes_by_action[action] = []
                 changes_by_action[action].append(filepath)
-            
+
             # Log summary
             for action, files in changes_by_action.items():
                 print(f"[FolderWatcher]   {action}: {len(files)} file(s)")
-            
-            # Execute callback with changes
+
+            # Execute callback with changes - callback returns JSON-RPC response
             if self.callback:
-                self.callback(changes_to_process, incremental=True)
-            
+                result = self.callback(changes_to_process, incremental=True)
+                # Result is now a list[TextContent] that will be sent via MCP
+                print(f"[FolderWatcher] Update callback completed, result returned via MCP")
+
             _last_scan_end_time = time.time()
             duration = _last_scan_end_time - _last_scan_start_time
             print(f"[FolderWatcher] Incremental update completed in {duration:.2f}s")
-            
+
         except Exception as e:
             _last_scan_end_time = time.time()
             print(f"[FolderWatcher] Error during incremental update: {e}")
@@ -197,50 +201,66 @@ def _check_full_scan_needed() -> bool:
 
 
 def _trigger_full_scan(callback: Callable):
-    """Trigger a full scan of all documents with database reset."""
+    """Trigger a full scan of all documents with database reset.
+
+    Args:
+        callback: Callback function that returns list[TextContent]
+
+    Returns:
+        list[TextContent]: Result from callback, or None if error
+    """
     global _last_scan_start_time, _last_scan_end_time, _last_full_scan_time
-    
+
     try:
         _last_scan_start_time = time.time()
         _last_full_scan_time = _last_scan_start_time
-        
+
+        # Note: These print statements are for server-side logging only
+        # The actual results are returned via the callback's JSON-RPC response
         print(f"\n[FolderWatcher] Starting FULL SCAN (with database reset) at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}")
-        
-        # Execute callback with full scan flag
+
+        # Execute callback with full scan flag - callback returns JSON-RPC response
+        result = None
         if callback:
-            callback([], incremental=False)
-        
+            result = callback([], incremental=False)
+            # Result is now a list[TextContent] that will be sent via MCP
+            print(f"[FolderWatcher] Full scan callback completed, result returned via MCP")
+
         _last_scan_end_time = time.time()
         duration = _last_scan_end_time - _last_scan_start_time
         print(f"[FolderWatcher] Full scan completed in {duration:.2f}s")
-        
+
+        return result
+
     except Exception as e:
         _last_scan_end_time = time.time()
         print(f"[FolderWatcher] Error during full scan: {e}")
         import traceback
         traceback.print_exc()
+        return None
 
 
-def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = None, 
-                         debounce_seconds: int = DEBOUNCE_SECONDS, 
+def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = None,
+                         debounce_seconds: int = DEBOUNCE_SECONDS,
                          do_initial_scan: bool = True):
     """
     Start watching a folder for changes with incremental update support.
-    
+
     Args:
-        scan_callback: Function to call when changes are detected. 
-                      Signature: callback(changes: List[Tuple[str, str]], incremental: bool)
+        scan_callback: Function to call when changes are detected.
+                      Signature: callback(changes: List[Tuple[str, str]], incremental: bool) -> list[TextContent]
                       - changes: List of (action, filepath) tuples
                       - incremental: True for incremental update, False for full scan
+                      - Returns: list[TextContent] with scan results
         folder_path: Path to watch (defaults to /my-docs)
         debounce_seconds: Minimum seconds between triggers (default: 10)
         do_initial_scan: Whether to perform initial full scan on startup
-    
+
     Returns:
-        dict: Status information
+        dict: Status information with optional 'scan_result' key containing list[TextContent]
     """
     global _observer, _watcher_active, _callback_function, _watch_path, _last_full_scan_time
-    
+
     # Check if already watching
     if _watcher_active:
         return {
@@ -248,51 +268,55 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
             "message": "Folder watcher is already active",
             "watch_path": str(_get_watch_path(folder_path))
         }
-    
+
     # Determine watch path
     watch_path = _get_watch_path(folder_path)
-    
+
     if not watch_path.exists():
         return {
             "status": "error",
             "message": f"Folder does not exist: {watch_path}",
             "watch_path": str(watch_path)
         }
-    
+
     try:
         # Store callback and path
         _callback_function = scan_callback
         _watch_path = watch_path
-        
+
         # Create event handler
         event_handler = IncrementalChangeHandler(
-            scan_callback, 
-            watch_path, 
+            scan_callback,
+            watch_path,
             debounce_seconds=debounce_seconds
         )
-        
+
         # Create and start observer
         _observer = Observer()
         _observer.schedule(event_handler, str(watch_path), recursive=True)
         _observer.start()
         _watcher_active = True
-        
+
         print(f"[FolderWatcher] Started watching: {watch_path.absolute()}")
         print(f"[FolderWatcher] Incremental updates enabled with {debounce_seconds}s debounce")
         print(f"[FolderWatcher] Full scan interval: {FULL_SCAN_INTERVAL_DAYS} days")
-        
-        # Do initial full scan if requested
-        if do_initial_scan:
-            print(f"[FolderWatcher] Performing initial full scan...")
-            _trigger_full_scan(scan_callback)
-        
-        return {
+
+        result = {
             "status": "started",
             "message": "Folder watcher started successfully",
             "watch_path": str(watch_path.absolute()),
             "debounce_seconds": debounce_seconds,
             "full_scan_interval_days": FULL_SCAN_INTERVAL_DAYS
         }
+
+        # Do initial full scan if requested and capture the result
+        if do_initial_scan:
+            print(f"[FolderWatcher] Performing initial full scan...")
+            scan_result = _trigger_full_scan(scan_callback)
+            if scan_result:
+                result['scan_result'] = scan_result
+
+        return result
     except Exception as e:
         _watcher_active = False
         return {
