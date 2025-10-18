@@ -108,7 +108,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 
 
 ## 2. Installation, with docker
-You need Docker Desktop, or Docker Engine, running. Then just:
+You need Docker Desktop, or Docker Engine, running. Then just write the following into a file called "docker-compose.yaml":
 ````yaml
 services:
   docs-to-ai:
@@ -141,6 +141,10 @@ services:
     stdin_open: true
     tty: true
     
+````
+then run, in bash or in Powershell:
+```bash
+docker compose up -d
 ````
 
 Add to your Claude Desktop config (`claude_desktop_config.json`):
