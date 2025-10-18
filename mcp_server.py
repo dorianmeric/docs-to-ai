@@ -393,7 +393,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "scan_all_my_documents":
             # Run the full scan function directly with database reset
             try:
-                doc_dir = "/app/docs"  # Docker path
+                doc_dir = "/app/my-docs"  # Docker path
                 # scan_all_my_documents now returns a list[TextContent] with debug info
                 return scan_all_my_documents(doc_dir)
             except Exception as e:
@@ -405,7 +405,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "start_watching_folder":
             try:
                 # Define the base directory for documents
-                doc_dir = "/app/docs"  # Docker path, adjust if needed
+                doc_dir = "/app/my-docs"  # Docker path, adjust if needed
                 
                 # Create a callback function that will trigger incremental or full scans
                 # The callback returns list[TextContent] with debug info for MCP response
@@ -574,7 +574,7 @@ async def startup_initialization():
         print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}")
         print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}")
 
-        doc_dir = "/app/docs"  # Docker path
+        doc_dir = "/app/my-docs"  # Docker path
 
         # Check if we should do anything on boot
         if not FULL_SCAN_ON_BOOT and not FOLDER_WATCHER_ACTIVE_ON_BOOT:

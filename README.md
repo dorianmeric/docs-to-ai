@@ -11,7 +11,7 @@ The model used for document retrieval is all-MiniLM-L6-v2, with 384 dimensions f
 - Extract text from PDF documents
 - Organize documents by topics (using folder structure)
 - Generate embeddings for semantic search
-- Store documents in a vector database (ChromaDB)
+- Store documents in a vector database (chromadb)
 - Expose MCP tools for Claude to search and retrieve documents
 - Filter searches by topic/category
 - Handle multiple documents with the same filename across different topics
@@ -23,7 +23,7 @@ PDFs (organized by topic folders)
   → Text Extraction
     → Chunking
       → Embeddings
-        → ChromaDB (with topic tags)
+        → chromadb (with topic tags)
           ↓
     MCP Server Tools
           ↓
@@ -66,7 +66,7 @@ The script will:
 - Detect topics from folder names
 - Extract and chunk text from each PDF
 - Tag chunks with their topic
-- Store everything in ChromaDB
+- Store everything in chromadb
 
 Example output:
 ```
@@ -116,7 +116,7 @@ services:
     container_name: docs-to-ai
     
     volumes:
-      - ./cache/chromadb:/app/chroma_db       # ChromaDB database (persists the vector store)
+      - ./cache/chromadb:/app/chromadb       # chromadb database (persists the vector store)
       - ./cache/doc_cache:/app/doc_cache      # Document cache (persists extracted text)
       - ./my-docs:/app/my-docs:ro             # Documents directory (your PDFs and Word docs). Read-only to prevent accidental modifications
     
@@ -208,7 +208,7 @@ Edit `config.py` to customize:
 - Chunk size and overlap
 - Number of search results
 - Embedding model
-- ChromaDB persistence directory
+- chromadb persistence directory
 - Topic extraction behavior (enable/disable folder-based topics)
 
 ### Topic Configuration

@@ -4,7 +4,7 @@ Run this after installing requirements to set up the environment.
 """
 
 from pathlib import Path
-from app.config import CHROMA_DB_DIR, DOC_CACHE_DIR, DOCS_DIR, BASE_DIR
+from app.config import CHROMADB_DIR, DOC_CACHE_DIR, DOCS_DIR, BASE_DIR
 
 
 def create_directories():
@@ -12,7 +12,7 @@ def create_directories():
     print("Creating directories...")
     
     directories = [
-        CHROMA_DB_DIR,
+        CHROMADB_DIR,
         DOC_CACHE_DIR,
         DOCS_DIR  # Default documents directory
     ]

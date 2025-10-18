@@ -3,11 +3,11 @@ import os
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent
-CHROMA_DB_DIR = BASE_DIR / "cache/chromadb"
+CHROMADB_DIR = BASE_DIR / "cache/chromadb"
 DOC_CACHE_DIR = BASE_DIR / "cache/doc_cache"
 DOCS_DIR = os.getenv('DOCS_DIR', BASE_DIR / "my-docs" ) # Default documents directory
 
-CHROMA_DB_DIR.mkdir(exist_ok=True, parents=True)
+CHROMADB_DIR.mkdir(exist_ok=True, parents=True)
 DOC_CACHE_DIR.mkdir(exist_ok=True, parents=True)
 DOCS_DIR.mkdir(exist_ok=True, parents=True)
 
@@ -31,7 +31,7 @@ USE_FOLDER_AS_TOPIC = True  # Use folder hierarchy as topic tags
 DEFAULT_TOPIC = os.getenv('DEFAULT_TOPIC', "uncategorized" ) # Default topic if no folder structure
 TOPIC_SEPARATOR = " > "  # Separator for hierarchical topics in display
 
-# ChromaDB Configuration
+# chromadb Configuration
 CHROMA_COLLECTION_NAME =  os.getenv('CHROMA_COLLECTION_NAME', "my-documents" )# you can rename this collection
 
 # MCP Server Startup Configuration

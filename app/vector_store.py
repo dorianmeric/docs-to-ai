@@ -4,7 +4,7 @@ from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Optional
 import json
 from app.config import (
-    CHROMA_DB_DIR, 
+    CHROMADB_DIR, 
     CHROMA_COLLECTION_NAME, 
     EMBEDDING_MODEL,
     DEFAULT_SEARCH_RESULTS
@@ -12,12 +12,12 @@ from app.config import (
 
 
 class VectorStore:
-    """Manages vector database operations using ChromaDB."""
+    """Manages vector database operations using chromadb."""
     
     def __init__(self):
-        # Initialize ChromaDB client with persistence
+        # Initialize chromadb client with persistence
         self.client = chromadb.PersistentClient(
-            path=str(CHROMA_DB_DIR),
+            path=str(CHROMADB_DIR),
             settings=Settings(
                 anonymized_telemetry=False,
                 allow_reset=True
@@ -53,7 +53,7 @@ class VectorStore:
         ids = [chunk['id'] for chunk in chunks]
         texts = [chunk['text'] for chunk in chunks]
         
-        # Convert topics list to JSON string for ChromaDB compatibility
+        # Convert topics list to JSON string for chromadb compatibility
         metadatas = []
         for chunk in chunks:
             metadata = chunk['metadata'].copy()

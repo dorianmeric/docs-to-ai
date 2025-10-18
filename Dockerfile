@@ -36,7 +36,7 @@ COPY --chown=appuser:appuser LICENSE ./
 COPY --chown=appuser:appuser README.md ./
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/chroma_db /app/doc_cache /app/docs && chown -R appuser:appuser /app
+RUN mkdir -p /app/cache/chromadb /app/cache/doc_cache /app/my-docs && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
