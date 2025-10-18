@@ -1,4 +1,4 @@
-# PDF/Word Document Query System with MCP
+# Docs-to-AI -- PDF/Word Document Query System with MCP
 
 A Model Context Protocol (MCP) server that enables LLMs (like Clause or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
 Supports: PDF, Word, Excel, Markdown.
@@ -116,29 +116,26 @@ services:
     container_name: docs-to-ai
     
     volumes:
-      # ChromaDB database (persists the vector store)
-      - ./cache/chromadb:/app/chroma_db
-      # Document cache (persists extracted text)
-      - ./cache/doc_cache:/app/doc_cache
-      # Documents directory (your PDFs and Word docs)
-      - ./my-docs:/my-docs:ro  # Read-only to prevent accidental modifications
+      - ./cache/chromadb:/app/chroma_db       # ChromaDB database (persists the vector store)
+      - ./cache/doc_cache:/app/doc_cache      # Document cache (persists extracted text)
+      - ./my-docs:/app/my-docs:ro             # Documents directory (your PDFs and Word docs). Read-only to prevent accidental modifications
     
+    # Stdin/stdout - required for MCP protocol
+    stdin_open: true
+    tty: true
+
     # Restart policy
     restart: unless-stopped
     
-    # Resource limits (optional - adjust based on your needs)
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 2G
-    
-    # Stdin/stdout for MCP protocol
-    stdin_open: true
-    tty: true
+    # # Resource limits (optional - adjust based on your needs)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 2G
     
 ````
 then run, in bash or in Powershell:
@@ -158,13 +155,17 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
         "run",
         "-i",
         "--rm",
-        "mcp/docs-to-ai"
+        "dmeric/docs-to-ai"
       ]
     }
 
   }
 }
+
 ```
+
+Finally, put your documents in the folder /my-docs, and ask the server to scan the documents, and optionally to start the folder watcher.
+You should now be able to ask your LLM questions about the documents.
 
 ## Project Structure
 

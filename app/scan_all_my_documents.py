@@ -4,6 +4,7 @@ from app.document_processor import DocumentProcessor
 from app.vector_store import VectorStore
 from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
 import sys
+from mcp.types import Tool, TextContent
 
 
 def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
@@ -21,7 +22,7 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
     doc_path = Path(doc_dir)
     
     if not doc_path.exists():
-        print(f"Error: Directory {doc_dir} does not exist")
+        response_parts.append(f"Error: Directory {doc_dir} does not exist")
         sys.exit(1)
     
     # Find all supported documents
@@ -30,13 +31,16 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
         doc_files.extend(list(doc_path.rglob(f"*{ext}")))
     
     if not doc_files:
-        print(f"No supported documents found in {doc_dir}")
-        print(f"Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}")
+
+        response_parts.append([TextContent(
+                    type="text",
+                    text=f"No supported documents found in {doc_dir}. Add documents and scan again."
+                )])
         sys.exit(0)
     
-    print(f"Found {len(doc_files)} document files")
-    print(f"Base directory: {doc_path}")
-    
+    response_parts = [f"Found {len(doc_files)} document files, in Base directory: {doc_path}\n"]
+
+
     # Analyze folder structure and topics
     all_topics = set()
     filetype_count = {}
@@ -51,27 +55,28 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
         filetype_count[ext] = filetype_count.get(ext, 0) + 1
     
     if all_topics and DEFAULT_TOPIC not in all_topics:
-        print(f"\nDetected topics: {', '.join(sorted(all_topics))}")
+        response_parts.append(f"\nDetected topics: {', '.join(sorted(all_topics))}")
     else:
-        print(f"\nNo topic folders detected (all documents in base directory)")
+        response_parts.append(f"\nNo topic folders detected (all documents in base directory)")
     
-    print(f"\nDocument types:")
+    response_parts.append(f"\nDocument types:")
     for ext, count in sorted(filetype_count.items()):
-        print(f"  {ext}: {count} files")
+        response_parts.append(f"\n  {ext}: {count} files")
     
     # Initialize store
     vector_store = VectorStore()
     
     # Reset database if requested
     if reset_database:
-        print("\n⚠ Resetting vector store (clearing all existing documents)...")
+        response_parts.append(f"\n  {ext}: {count} files")
+        response_parts.append("\n⚠ Resetting vector store (clearing all existing documents)...")
         vector_store.reset()
-        print("✓ Vector store reset complete")
+        response_parts.append("✓ Vector store reset complete")
         
         # Clear document cache to ensure fresh extraction
-        print("\n⚠ Clearing document cache...")
+        response_parts.append("\n⚠ Clearing document cache...")
         processor.clear_document_cache()
-        print("✓ Document cache cleared\n")
+        response_parts.append("✓ Document cache cleared\n")
     
     # Process each document
     total_chunks = 0
@@ -86,9 +91,9 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
         topics_display = TOPIC_SEPARATOR.join(topics)
         ext = doc_file.suffix.lower()
         
-        print(f"\n[{i}/{len(doc_files)}] Processing: {doc_file.name}")
-        print(f"  Type: {ext}")
-        print(f"  Topics: {topics_display}")
+        response_parts.append(f"\n[{i}/{len(doc_files)}] Processing: {doc_file.name}")
+        response_parts.append(f"  Type: {ext}")
+        response_parts.append(f"  Topics: {topics_display}")
         
         try:
             # Process document with base directory for topic extraction
@@ -113,45 +118,51 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
                 filetype_stats[ext]['docs'] += 1
                 filetype_stats[ext]['chunks'] += num_added
                 
-                print(f"  ✓ Added {num_added} chunks")
+                response_parts.append(f"  ✓ Added {num_added} chunks")
             else:
-                print(f"  ⚠ No text extracted from {doc_file.name}")
+                response_parts.append(f"  ⚠ No text extracted from {doc_file.name}")
                 failed += 1
                 
         except Exception as e:
-            print(f"  ✗ Error processing {doc_file.name}: {e}")
+            response_parts.append(f"  ✗ Error processing {doc_file.name}: {e}")
             failed += 1
     
     # Summary
-    print("\n" + "="*60)
-    print("INGESTION SUMMARY")
-    print("="*60)
-    print(f"Total documents processed: {len(doc_files)}")
-    print(f"Successful: {successful}")
-    print(f"Failed: {failed}")
-    print(f"Total chunks added: {total_chunks}")
+    response_parts.append("\n" + "="*60)
+    response_parts.append("INGESTION SUMMARY")
+    response_parts.append("="*60)
+    response_parts.append(f"Total documents processed: {len(doc_files)}")
+    response_parts.append(f"Successful: {successful}")
+    response_parts.append(f"Failed: {failed}")
+    response_parts.append(f"Total chunks added: {total_chunks}")
     
     if topic_stats:
-        print(f"\nChunks per topic:")
+        response_parts.append(f"\nChunks per topic:")
         for topic in sorted(topic_stats.keys()):
             stats = topic_stats[topic]
             docs_str = f"{stats['docs']} documents" if 'docs' in stats and stats['docs'] > 0 else ""
-            print(f"  {topic}: {stats['chunks']} chunks" + (f" ({docs_str})" if docs_str else ""))
+            response_parts.append(f"  {topic}: {stats['chunks']} chunks" + (f" ({docs_str})" if docs_str else ""))
     
     if filetype_stats:
-        print(f"\nDocuments per file type:")
+        response_parts.append(f"\nDocuments per file type:")
         for ext in sorted(filetype_stats.keys()):
             stats = filetype_stats[ext]
-            print(f"  {ext}: {stats['docs']} documents, {stats['chunks']} chunks")
+            response_parts.append(f"  {ext}: {stats['docs']} documents, {stats['chunks']} chunks")
     
-    print(f"\nVector store stats:")
+    response_parts.append(f"\nVector store stats:")
     stats = vector_store.get_stats()
-    print(f"  Total chunks in store: {stats['total_chunks']}")
-    print(f"  Total documents: {stats['total_documents']}")
-    print(f"  Total topics: {stats['total_topics']}")
+    response_parts.append(f"  Total chunks in store: {stats['total_chunks']}")
+    response_parts.append(f"  Total documents: {stats['total_documents']}")
+    response_parts.append(f"  Total topics: {stats['total_topics']}")
     if stats['topics']:
-        print(f"  Topics: {', '.join(stats['topics'])}")
+        response_parts.append(f"  Topics: {', '.join(stats['topics'])}")
 
+    response_parts.append(f"\n✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)")
+
+    return [TextContent(
+                type="text",
+                text="\n".join(response_parts)
+            )]
 
 def main():
     parser = argparse.ArgumentParser(

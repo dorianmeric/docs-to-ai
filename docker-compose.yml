@@ -13,7 +13,7 @@ services:
       # Document cache (persists extracted text)
       - ./cache/doc_cache:/app/doc_cache
       # Documents directory (your PDFs and Word docs)
-      - ./my-docs:/my-docs:ro  # Read-only to prevent accidental modifications
+      - ./my-docs:/app/my-docs:ro  # Read-only to prevent accidental modifications
     
     # Environment variables (optional)
     environment:
