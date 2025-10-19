@@ -37,8 +37,6 @@ ENV/
 *.swp
 *.swo
 
-# ChromaDB & doc cache
-cache/
 
 # Logs
 *.log
@@ -52,7 +50,6 @@ test.pdf
 *.tmp
 
 
-my-docs/
 
 # Docker
 # .dockerignore
@@ -60,3 +57,8 @@ docker-compose.override.yml
 
 .continue/
 .mcp-debug-tools/
+
+
+# ChromaDB & doc cache
+cache/
+my-docs/

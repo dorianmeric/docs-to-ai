@@ -575,56 +575,58 @@ def get_time_of_last_folder_scan() -> str:
 #     #     print(f"[MCP] Error stopping folder watcher: {e}")
 
 
-# def main():
-#     """Main entry point - determine transport type from environment or arguments."""
-#     import sys
-#     import os
+async def main():
+    """Main entry point - determine transport type from environment or arguments."""
+    import sys
+    import os
 
-#     # Check for transport type from environment variable or command line
-#     transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    # Check for transport type from environment variable or command line
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
 
-#     # Allow command line override
-#     if len(sys.argv) > 1:
-#         if sys.argv[1] in ["--websocket", "--sse", "--http"]:
-#             transport = "websocket"
-#         elif sys.argv[1] == "--stdio":
-#             transport = "stdio"
-#         elif sys.argv[1] == "--help":
-#             print("Usage: python mcp_server.py [OPTIONS]")
-#             print("\nOptions:")
-#             print("  --stdio              Use stdio transport (default)")
-#             print("  --websocket, --sse   Use SSE/WebSocket transport over HTTP")
-#             print("  --host HOST          Host to bind to (default: 0.0.0.0)")
-#             print("  --port PORT          Port to bind to (default: 38777)")
-#             print("\nEnvironment Variables:")
-#             print("  MCP_TRANSPORT        Transport type: 'stdio' or 'websocket'")
-#             print("  MCP_HOST             Host to bind to (websocket mode)")
-#             print("  MCP_PORT             Port to bind to (websocket mode)")
-#             sys.exit(0)
+    # Allow command line override
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ["--websocket", "--sse", "--http"]:
+            transport = "websocket"
+        elif sys.argv[1] == "--stdio":
+            transport = "stdio"
+        elif sys.argv[1] == "--help":
+            print("Usage: python mcp_server.py [OPTIONS]")
+            print("\nOptions:")
+            print("  --stdio              Use stdio transport (default)")
+            print("  --websocket, --sse   Use SSE/WebSocket transport over HTTP")
+            print("  --host HOST          Host to bind to (default: 0.0.0.0)")
+            print("  --port PORT          Port to bind to (default: 38777)")
+            print("\nEnvironment Variables:")
+            print("  MCP_TRANSPORT        Transport type: 'stdio' or 'websocket'")
+            print("  MCP_HOST             Host to bind to (websocket mode)")
+            print("  MCP_PORT             Port to bind to (websocket mode)")
+            sys.exit(0)
 
-#     # Get host and port for websocket mode
-#     host = os.getenv("MCP_HOST", "0.0.0.0")
-#     port = int(os.getenv("MCP_PORT", "38777"))
+    # Get host and port for websocket mode
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "38777"))
 
-#     # Parse additional command line arguments
-#     i = 1
-#     while i < len(sys.argv):
-#         if sys.argv[i] == "--host" and i + 1 < len(sys.argv):
-#             host = sys.argv[i + 1]
-#             i += 2
-#         elif sys.argv[i] == "--port" and i + 1 < len(sys.argv):
-#             port = int(sys.argv[i + 1])
-#             i += 2
-#         else:
-#             i += 1
+    # Parse additional command line arguments
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] == "--host" and i + 1 < len(sys.argv):
+            host = sys.argv[i + 1]
+            i += 2
+        elif sys.argv[i] == "--port" and i + 1 < len(sys.argv):
+            port = int(sys.argv[i + 1])
+            i += 2
+        else:
+            i += 1
 
-#     # Run the appropriate transport
-#     if transport == "websocket":
-#         asyncio.run(main_websocket(host=host, port=port))
-#     else:
-#         asyncio.run(main_stdio())
+    # Run the appropriate transport
+    stdio_task = asyncio.create_task(app.run_stdio())
+    http_task = asyncio.create_task(app.run_http(host=host, port=port))
+    
+    # Wait for either to stop
+    await asyncio.wait([stdio_task, http_task], return_when=asyncio.FIRST_COMPLETED)
 
 
-# if __name__ == "__main__":
-#     main()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 

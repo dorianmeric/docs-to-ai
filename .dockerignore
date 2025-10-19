@@ -51,3 +51,7 @@ build/
 # Example/template files
 *.example.*
 claude_desktop_config.example.json
+
+cache/
+my-docs/
+
