@@ -1,7 +1,8 @@
 import chromadb
 from chromadb.config import Settings
+from chromadb.types import Metadata
 from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import json
 from app.config import (
     CHROMADB_DIR, 
@@ -60,7 +61,7 @@ class VectorStore:
         # Mark as initialized
         VectorStore._initialized = True
     
-    def add_documents(self, chunks: List[Dict[str, any]]) -> int:
+    def add_documents(self, chunks: List[Dict[str, Any]]) -> int:
         """
         Add document chunks to the vector store.
         
@@ -104,17 +105,20 @@ class VectorStore:
         print(f"Added {len(chunks)} chunks to vector store", file=sys.stderr)
         return len(chunks)
     
-    def _deserialize_metadata(self, metadata: Dict) -> Dict:
+    def _deserialize_metadata(self, metadata: Metadata | Dict[str, Any]) -> Dict[str, Any]:
         """Convert topics_json back to topics list."""
-        if 'topics_json' in metadata:
+        # Convert to mutable dict
+        result: Dict[str, Any] = dict(metadata)
+
+        if 'topics_json' in result:
             try:
-                metadata['topics'] = json.loads(metadata['topics_json'])
+                result['topics'] = json.loads(str(result['topics_json']))
             except:
-                metadata['topics'] = [metadata.get('primary_topic', 'uncategorized')]
-        elif 'topics' not in metadata:
+                result['topics'] = [result.get('primary_topic', 'uncategorized')]
+        elif 'topics' not in result:
             # Handle old format or missing topics
-            metadata['topics'] = [metadata.get('primary_topic', metadata.get('topic', 'uncategorized'))]
-        return metadata
+            result['topics'] = [result.get('primary_topic', result.get('topic', 'uncategorized'))]
+        return result
     
     def search(self, query: str, n_results: int = DEFAULT_SEARCH_RESULTS) -> List[Dict]:
         """
@@ -138,17 +142,18 @@ class VectorStore:
         
         # Format results
         formatted_results = []
-        
-        if results['ids'] and results['ids'][0]:
+
+        if results['ids'] and results['ids'][0] and results['metadatas'] and results['documents']:
+            distances = results.get('distances')
             for i in range(len(results['ids'][0])):
                 metadata = self._deserialize_metadata(results['metadatas'][0][i])
                 formatted_results.append({
                     'id': results['ids'][0][i],
                     'text': results['documents'][0][i],
                     'metadata': metadata,
-                    'distance': results['distances'][0][i] if 'distances' in results else None
+                    'distance': distances[0][i] if distances and distances[0] else None
                 })
-        
+
         return formatted_results
     
     def get_document(self, doc_id: str) -> Optional[Dict]:
@@ -162,8 +167,8 @@ class VectorStore:
             Document dict or None if not found
         """
         result = self.collection.get(ids=[doc_id])
-        
-        if result['ids']:
+
+        if result['ids'] and result['metadatas'] and result['documents']:
             metadata = self._deserialize_metadata(result['metadatas'][0])
             return {
                 'id': result['ids'][0],
@@ -173,7 +178,7 @@ class VectorStore:
         
         return None
     
-    def list_documents(self) -> List[Dict[str, any]]:
+    def list_documents(self) -> List[Dict[str, Any]]:
         """
         Get list of all unique documents in the store with their topics.
         
@@ -184,7 +189,7 @@ class VectorStore:
         try:
             all_docs = self.collection.get()
         except Exception as e: # if the collection is not found
-            return {}
+            return []
         
         # Extract unique documents (by filepath)
         documents = {}
@@ -274,10 +279,10 @@ class VectorStore:
         """
         # Get all documents
         all_docs = self.collection.get()
-        
+
         # Find IDs matching the filepath
         ids_to_delete = []
-        if all_docs['metadatas']:
+        if all_docs['metadatas'] and all_docs['ids']:
             for i, metadata in enumerate(all_docs['metadatas']):
                 if metadata.get('filepath') == filepath:
                     ids_to_delete.append(all_docs['ids'][i])
@@ -301,10 +306,10 @@ class VectorStore:
         """
         # Get all documents
         all_docs = self.collection.get()
-        
+
         # Find IDs where topic appears in the topics list
         ids_to_delete = []
-        if all_docs['metadatas']:
+        if all_docs['metadatas'] and all_docs['ids']:
             for i, metadata in enumerate(all_docs['metadatas']):
                 # Deserialize topics
                 metadata = self._deserialize_metadata(metadata)
@@ -344,6 +349,7 @@ if __name__ == "__main__":
     print(f"Documents: {stats['documents']}", file=sys.stderr)
     
     # Test search
+    results = []
     if stats['total_chunks'] > 0:
         results = store.search("test query", n_results=3)
     print(f"\nTest search returned {len(results)} results", file=sys.stderr)

@@ -1,6 +1,6 @@
 import pymupdf  # PyMuPDF -- Library for PDF processing
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import hashlib
 import json
 import sys
@@ -60,7 +60,7 @@ class DocumentProcessor:
         
         return topics if topics else [DEFAULT_TOPIC]
     
-    def extract_text_from_pdf(self, pdf_path: Path) -> List[Dict[str, any]]:
+    def extract_text_from_pdf(self, pdf_path: Path) -> List[Dict[str, Any]]:
         """
         Extract text from PDF, maintaining page information.
         
@@ -93,7 +93,7 @@ class DocumentProcessor:
         
         return pages_data
     
-    def extract_text_from_docx(self, docx_path: Path) -> List[Dict[str, any]]:
+    def extract_text_from_docx(self, docx_path: Path) -> List[Dict[str, Any]]:
         """
         Extract text from Word document.
         
@@ -104,9 +104,9 @@ class DocumentProcessor:
             List of dicts with 'page' (paragraph number) and 'text'
         """
         pages_data = []
-        
+
         try:
-            doc = DocxDocument(docx_path)
+            doc = DocxDocument(str(docx_path))
             
             # Combine paragraphs into chunks (simulating pages)
             # Group every ~10 paragraphs as a "page"
@@ -136,7 +136,7 @@ class DocumentProcessor:
         
         return pages_data
     
-    def extract_text_from_markdown(self, md_path: Path) -> List[Dict[str, any]]:
+    def extract_text_from_markdown(self, md_path: Path) -> List[Dict[str, Any]]:
         """
         Extract text from markdown file.
         
@@ -189,7 +189,7 @@ class DocumentProcessor:
         
         return pages_data
     
-    def extract_text_from_excel(self, excel_path: Path) -> List[Dict[str, any]]:
+    def extract_text_from_excel(self, excel_path: Path) -> List[Dict[str, Any]]:
         """
         Extract text from Excel file.
         
@@ -217,9 +217,9 @@ class DocumentProcessor:
                     sheet_text += "Columns: " + ", ".join(str(col) for col in columns) + "\n\n"
                     
                     # Add data rows
-                    for index, row in df.iterrows():
+                    for row_num, (_, row) in enumerate(df.iterrows(), start=1):
                         row_text = "\t".join(str(val) for val in row.values)
-                        sheet_text += f"Row {index + 1}: {row_text}\n"
+                        sheet_text += f"Row {row_num}: {row_text}\n"
                 else:
                     sheet_text += "(Empty sheet)\n"
                 
@@ -235,7 +235,7 @@ class DocumentProcessor:
         
         return pages_data
     
-    def extract_text_from_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, any]]:
+    def extract_text_from_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Extract text from document (PDF, Word, Markdown, or Excel), maintaining structure.
         
@@ -246,18 +246,18 @@ class DocumentProcessor:
         Returns:
             List of dicts with 'page', 'text', and 'metadata'
         """
-        doc_path = Path(doc_path)
+        doc_file = Path(doc_path)
         base_path = Path(base_dir) if base_dir else None
-        
+
         # Extract topics from folder hierarchy
-        topics = self.extract_topics_from_path(doc_path, base_path)
-        
+        topics = self.extract_topics_from_path(doc_file, base_path)
+
         # Get file metadata
-        file_size = doc_path.stat().st_size
-        last_modified = doc_path.stat().st_mtime
+        file_size = doc_file.stat().st_size
+        last_modified = doc_file.stat().st_mtime
 
         # Check cache
-        cache_file = self._get_cache_path(doc_path)
+        cache_file = self._get_cache_path(doc_file)
         if cache_file.exists():
             cached_data = json.load(open(cache_file, 'r', encoding='utf-8'))
             # Update topics in cached data in case folder structure changed
@@ -266,25 +266,25 @@ class DocumentProcessor:
                 page_data['metadata']['file_size'] = file_size
                 page_data['metadata']['last_modified'] = last_modified
             return cached_data
-        
+
         # Determine file type and extract text
-        extension = doc_path.suffix.lower()
-        
+        extension = doc_file.suffix.lower()
+
         if extension == '.pdf':
-            pages_data = self.extract_text_from_pdf(doc_path)
+            pages_data = self.extract_text_from_pdf(doc_file)
         elif extension in ['.docx', '.doc']:
-            pages_data = self.extract_text_from_docx(doc_path)
+            pages_data = self.extract_text_from_docx(doc_file)
         elif extension == '.md':
-            pages_data = self.extract_text_from_markdown(doc_path)
+            pages_data = self.extract_text_from_markdown(doc_file)
         elif extension in ['.xlsx', '.xls', '.xlsam', '.xlsb']:
-            pages_data = self.extract_text_from_excel(doc_path)
+            pages_data = self.extract_text_from_excel(doc_file)
         else:
             print(f"Unsupported file type: {extension}", file=sys.stderr)
             return []
-        
 
-        print(f"\n⚠ File: {doc_path}, Found file_size = {file_size} bytes, last_modified = {last_modified} (after caching check)", file=sys.stderr)
-            
+
+        print(f"\n⚠ File: {doc_file}, Found file_size = {file_size} bytes, last_modified = {last_modified} (after caching check)", file=sys.stderr)
+
         # Add metadata to each page
         result = []
         for page_data in pages_data:
@@ -292,8 +292,8 @@ class DocumentProcessor:
                 'page': page_data['page'],
                 'text': page_data['text'],
                 'metadata': {
-                    'filename': doc_path.name,
-                    'filepath': str(doc_path),
+                    'filename': doc_file.name,
+                    'filepath': str(doc_file),
                     'topics': topics,
                     'filetype': extension,
                     'file_size': file_size,
@@ -301,13 +301,13 @@ class DocumentProcessor:
                     'total_pages': page_data['total_pages']
                 }
             })
-        
+
         # Cache the result
-        self._cache_extracted_text(doc_path, result)
+        self._cache_extracted_text(doc_file, result)
         
         return result
     
-    def chunk_text(self, pages_data: List[Dict[str, any]]) -> List[Dict[str, any]]:
+    def chunk_text(self, pages_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Split text into chunks with overlap.
         
@@ -355,7 +355,7 @@ class DocumentProcessor:
         
         return chunks
     
-    def process_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, any]]:
+    def process_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Complete pipeline: extract text and chunk it.
         

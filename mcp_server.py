@@ -342,10 +342,8 @@ def start_watching_folder() -> str:
                 response_parts.append("\n" + "="*60)
                 response_parts.append("INITIAL SCAN RESULTS:")
                 response_parts.append("="*60)
-                # scan_result is list[TextContent], extract the text
-                for content in result['scan_result']:
-                    if hasattr(content, 'text'):
-                        response_parts.append(content.text)
+                # scan_result is a string from scan_all()
+                response_parts.append(result['scan_result'])
 
             return "\n".join(response_parts)
         elif result['status'] == 'already_watching':
@@ -397,11 +395,12 @@ def get_time_of_last_folder_scan() -> str:
             # Add full scan info
             if 'last_full_scan_time_formatted' in result:
                 response_parts.append(f"\nLast Full Scan: {result['last_full_scan_time_formatted']}")
-                response_parts.append(f"Days since full scan: {result['days_since_full_scan']}")
+                days_since = int(result['days_since_full_scan'])
+                response_parts.append(f"Days since full scan: {days_since}")
                 if result.get('next_full_scan_due'):
                     response_parts.append("Next full scan: DUE NOW")
                 else:
-                    days_remaining = 7 - result['days_since_full_scan']
+                    days_remaining = 7 - days_since
                     response_parts.append(f"Next full scan in: {days_remaining} days")
 
             return "\n".join(response_parts)

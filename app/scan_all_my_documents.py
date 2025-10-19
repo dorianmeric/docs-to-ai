@@ -5,7 +5,7 @@ from app.vector_store import VectorStore
 from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
 import sys
 
-def scan_all(doc_dir: str = DOCS_DIR, reset_database: bool = True):
+def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
     """
     Ingest all documents (PDFs, Word, Markdown, Excel) from a directory into the vector store.
     Uses folder structure to tag documents with hierarchical topics.
@@ -104,10 +104,9 @@ def scan_all(doc_dir: str = DOCS_DIR, reset_database: bool = True):
     # Get the singleton VectorStore instance
     # All calls to VectorStore() return the same instance
     vector_store = VectorStore()
-    
+
     # Reset database if requested
     if reset_database:
-        response_parts.append(f"\n  {ext}: {count} files")
         response_parts.append("\n⚠ Resetting vector store (clearing all existing documents)...")
         try:
             vector_store.reset()

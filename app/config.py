@@ -5,7 +5,7 @@ import os
 BASE_DIR = Path(__file__).parent.parent
 CHROMADB_DIR = BASE_DIR / "cache/chromadb"
 DOC_CACHE_DIR = BASE_DIR / "cache/doc_cache"
-DOCS_DIR = os.getenv('DOCS_DIR', BASE_DIR / "my-docs" ) # Default documents directory
+DOCS_DIR = Path(os.getenv('DOCS_DIR', BASE_DIR / "my-docs")) # Default documents directory
 
 CHROMADB_DIR.mkdir(exist_ok=True, parents=True)
 DOC_CACHE_DIR.mkdir(exist_ok=True, parents=True)
@@ -23,8 +23,8 @@ CHUNK_SIZE = 1000  # Characters per chunk
 CHUNK_OVERLAP = 200  # Overlap between chunks
 
 # Search Configuration
-DEFAULT_SEARCH_RESULTS = os.getenv('DEFAULT_SEARCH_RESULTS', 10 )
-MAX_SEARCH_RESULTS = os.getenv('MAX_SEARCH_RESULTS', 20 )
+DEFAULT_SEARCH_RESULTS: int = int(os.getenv('DEFAULT_SEARCH_RESULTS', '10'))
+MAX_SEARCH_RESULTS: int = int(os.getenv('MAX_SEARCH_RESULTS', '20'))
 
 # Topic/Folder Configuration
 USE_FOLDER_AS_TOPIC = True  # Use folder hierarchy as topic tags

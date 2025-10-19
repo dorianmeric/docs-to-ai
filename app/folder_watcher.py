@@ -428,7 +428,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        src_path = event.src_path
+        src_path = str(event.src_path)
         if self._should_ignore(src_path) or not self._is_supported_file(src_path):
             return
 
@@ -464,7 +464,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        src_path = event.src_path
+        src_path = str(event.src_path)
         if self._should_ignore(src_path) or not self._is_supported_file(src_path):
             return
 
@@ -501,7 +501,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        src_path = event.src_path
+        src_path = str(event.src_path)
         if self._should_ignore(src_path) or not self._is_supported_file(src_path):
             return
 
@@ -545,8 +545,8 @@ class IncrementalChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        src_path = event.src_path
-        dest_path = event.dest_path
+        src_path = str(event.src_path)
+        dest_path = str(event.dest_path)
 
         # Handle source file (old location)
         if self._is_supported_file(src_path) and not self._should_ignore(src_path):
@@ -998,6 +998,11 @@ def trigger_full_scan_if_needed():
 
     # Check if it's time for a full scan
     if _check_full_scan_needed():
+        if _callback_function is None:
+            return {
+                "status": "error",
+                "message": "No callback function is set"
+            }
         _trigger_full_scan(_callback_function)
         return {
             "status": "full_scan_triggered",
@@ -1005,6 +1010,12 @@ def trigger_full_scan_if_needed():
         }
     else:
         # Calculate how many days until next scan
+        if _last_full_scan_time is None:
+            # This should not happen due to _check_full_scan_needed() logic, but handle defensively
+            return {
+                "status": "error",
+                "message": "Last full scan time is not set"
+            }
         days_since = (datetime.now() - datetime.fromtimestamp(_last_full_scan_time)).days
         days_until = FULL_SCAN_INTERVAL_DAYS - days_since
         return {
@@ -1046,6 +1057,12 @@ def force_full_scan():
         return {
             "status": "not_watching",
             "message": "Folder watcher is not currently active"
+        }
+
+    if _callback_function is None:
+        return {
+            "status": "error",
+            "message": "No callback function is set"
         }
 
     # Trigger full scan regardless of schedule
