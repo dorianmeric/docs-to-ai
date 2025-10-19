@@ -12,6 +12,7 @@ from watchdog.events import FileSystemEventHandler, FileSystemEvent
 from app.config import BASE_DIR, SUPPORTED_EXTENSIONS
 from typing import Callable, Optional, Set
 import os
+import sys
 
 # Global state
 _observer = None
@@ -80,8 +81,8 @@ class IncrementalChangeHandler(FileSystemEventHandler):
             _last_scan_start_time = time.time()
             # Note: These print statements are for server-side logging only
             # The actual results are returned via the callback's JSON-RPC response
-            print(f"\n[FolderWatcher] Starting incremental update at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}")
-            print(f"[FolderWatcher] Processing {len(changes_to_process)} file change(s)")
+            print(f"\n[FolderWatcher] Starting incremental update at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}", file=sys.stderr)
+            print(f"[FolderWatcher] Processing {len(changes_to_process)} file change(s)", file=sys.stderr)
 
             # Group changes by action
             changes_by_action = {}
@@ -92,21 +93,21 @@ class IncrementalChangeHandler(FileSystemEventHandler):
 
             # Log summary
             for action, files in changes_by_action.items():
-                print(f"[FolderWatcher]   {action}: {len(files)} file(s)")
+                print(f"[FolderWatcher]   {action}: {len(files)} file(s)", file=sys.stderr)
 
             # Execute callback with changes - callback returns JSON-RPC response
             if self.callback:
                 result = self.callback(changes_to_process, incremental=True)
                 # Result is now a list[TextContent] that will be sent via MCP
-                print(f"[FolderWatcher] Update callback completed, result returned via MCP")
+                print(f"[FolderWatcher] Update callback completed, result returned via MCP", file=sys.stderr)
 
             _last_scan_end_time = time.time()
             duration = _last_scan_end_time - _last_scan_start_time
-            print(f"[FolderWatcher] Incremental update completed in {duration:.2f}s")
+            print(f"[FolderWatcher] Incremental update completed in {duration:.2f}s", file=sys.stderr)
 
         except Exception as e:
             _last_scan_end_time = time.time()
-            print(f"[FolderWatcher] Error during incremental update: {e}")
+            print(f"[FolderWatcher] Error during incremental update: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
     
@@ -124,7 +125,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
             self.pending_changes.discard(('delete', src_path))
             self.pending_changes.add(('add', src_path))
         
-        print(f"[FolderWatcher] File created: {src_path}")
+        print(f"[FolderWatcher] File created: {src_path}", file=sys.stderr)
         self._schedule_update()
     
     def on_modified(self, event: FileSystemEvent):
@@ -140,7 +141,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
             # Treat modification as update
             self.pending_changes.add(('update', src_path))
         
-        print(f"[FolderWatcher] File modified: {src_path}")
+        print(f"[FolderWatcher] File modified: {src_path}", file=sys.stderr)
         self._schedule_update()
     
     def on_deleted(self, event: FileSystemEvent):
@@ -158,7 +159,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
             self.pending_changes.discard(('update', src_path))
             self.pending_changes.add(('delete', src_path))
         
-        print(f"[FolderWatcher] File deleted: {src_path}")
+        print(f"[FolderWatcher] File deleted: {src_path}", file=sys.stderr)
         self._schedule_update()
     
     def on_moved(self, event: FileSystemEvent):
@@ -176,7 +177,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
                 self.pending_changes.discard(('add', src_path))
                 self.pending_changes.discard(('update', src_path))
                 self.pending_changes.add(('delete', src_path))
-            print(f"[FolderWatcher] File moved from: {src_path}")
+            print(f"[FolderWatcher] File moved from: {src_path}", file=sys.stderr)
         
         # Handle destination file
         if self._is_supported_file(dest_path) and not self._should_ignore(dest_path):
@@ -184,7 +185,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
                 # Add new file at destination
                 self.pending_changes.discard(('delete', dest_path))
                 self.pending_changes.add(('add', dest_path))
-            print(f"[FolderWatcher] File moved to: {dest_path}")
+            print(f"[FolderWatcher] File moved to: {dest_path}", file=sys.stderr)
         
         self._schedule_update()
 
@@ -217,24 +218,24 @@ def _trigger_full_scan(callback: Callable):
 
         # Note: These print statements are for server-side logging only
         # The actual results are returned via the callback's JSON-RPC response
-        print(f"\n[FolderWatcher] Starting FULL SCAN (with database reset) at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}")
+        print(f"\n[FolderWatcher] Starting FULL SCAN (with database reset) at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}", file=sys.stderr)
 
         # Execute callback with full scan flag - callback returns JSON-RPC response
         result = None
         if callback:
             result = callback([], incremental=False)
             # Result is now a list[TextContent] that will be sent via MCP
-            print(f"[FolderWatcher] Full scan callback completed, result returned via MCP")
+            print(f"[FolderWatcher] Full scan callback completed, result returned via MCP", file=sys.stderr)
 
         _last_scan_end_time = time.time()
         duration = _last_scan_end_time - _last_scan_start_time
-        print(f"[FolderWatcher] Full scan completed in {duration:.2f}s")
+        print(f"[FolderWatcher] Full scan completed in {duration:.2f}s", file=sys.stderr)
 
         return result
 
     except Exception as e:
         _last_scan_end_time = time.time()
-        print(f"[FolderWatcher] Error during full scan: {e}")
+        print(f"[FolderWatcher] Error during full scan: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return None
@@ -297,9 +298,9 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
         _observer.start()
         _watcher_active = True
 
-        print(f"[FolderWatcher] Started watching: {watch_path.absolute()}")
-        print(f"[FolderWatcher] Incremental updates enabled with {debounce_seconds}s debounce")
-        print(f"[FolderWatcher] Full scan interval: {FULL_SCAN_INTERVAL_DAYS} days")
+        print(f"[FolderWatcher] Started watching: {watch_path.absolute()}", file=sys.stderr)
+        print(f"[FolderWatcher] Incremental updates enabled with {debounce_seconds}s debounce", file=sys.stderr)
+        print(f"[FolderWatcher] Full scan interval: {FULL_SCAN_INTERVAL_DAYS} days", file=sys.stderr)
 
         result = {
             "status": "started",
@@ -311,7 +312,7 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
 
         # Do initial full scan if requested and capture the result
         if do_initial_scan:
-            print(f"[FolderWatcher] Performing initial full scan...")
+            print(f"[FolderWatcher] Performing initial full scan...", file=sys.stderr)
             scan_result = _trigger_full_scan(scan_callback)
             if scan_result:
                 result['scan_result'] = scan_result
@@ -351,7 +352,7 @@ def stop_watching_folder():
         _callback_function = None
         _watch_path = None
         
-        print("[FolderWatcher] Stopped watching folder")
+        print("[FolderWatcher] Stopped watching folder", file=sys.stderr)
         
         return {
             "status": "stopped",
@@ -507,11 +508,13 @@ if __name__ == "__main__":
     def simple_callback(changes, incremental):
         """Simple callback for standalone mode."""
         if incremental:
-            print(f"[FolderWatcher] Processing {len(changes)} incremental changes")
+            print(f"[FolderWatcher] Processing {len(changes)} incremental changes", file=sys.stderr)
             for action, filepath in changes:
-                print(f"[FolderWatcher]   {action}: {filepath}")
+                print(f"[FolderWatcher]   {action}: {filepath}", file=sys.stderr)
+                pass
         else:
-            print("[FolderWatcher] Performing full scan")
+            print("[FolderWatcher] Performing full scan", file=sys.stderr)
+            pass
         
         # Trigger full scan script (for backward compatibility)
         try:
@@ -522,27 +525,30 @@ if __name__ == "__main__":
                 check=True,
                 timeout=600
             )
-            print(f"[FolderWatcher] Scan output: {result.stdout}")
+            print(f"[FolderWatcher] Scan output: {result.stdout}", file=sys.stderr)
             if result.stderr:
-                print(f"[FolderWatcher] Scan errors: {result.stderr}")
+                print(f"[FolderWatcher] Scan errors: {result.stderr}", file=sys.stderr)
+                pass
         except subprocess.TimeoutExpired:
-            print("[FolderWatcher] Scan timed out")
+            print("[FolderWatcher] Scan timed out", file=sys.stderr)
+            pass
         except Exception as e:
-            print(f"[FolderWatcher] Error running scan: {e}")
+            print(f"[FolderWatcher] Error running scan: {e}", file=sys.stderr)
+            pass
     
     if len(sys.argv) < 2:
-        print("Usage: python folder_watcher.py <folder_path>")
+        print("Usage: python folder_watcher.py <folder_path>", file=sys.stderr)
         sys.exit(1)
     
     folder_to_watch = sys.argv[1]
     result = start_watching_folder(simple_callback, folder_path=folder_to_watch)
     
     if result["status"] != "started":
-        print(f"Error: {result['message']}")
+        print(f"Error: {result['message']}", file=sys.stderr)
         sys.exit(1)
     
-    print(f"Watching folder: {result['watch_path']}")
-    print("Press Ctrl+C to stop watching\n")
+        print(f"Watching folder: {result['watch_path']}", file=sys.stderr)
+        print("Press Ctrl+C to stop watching\n", file=sys.stderr)
     
     try:
         while True:
@@ -550,6 +556,6 @@ if __name__ == "__main__":
             # Check if full scan is needed every minute
             trigger_full_scan_if_needed()
     except KeyboardInterrupt:
-        print("\n[FolderWatcher] Stopping...")
+        print("\n[FolderWatcher] Stopping...", file=sys.stderr)
         stop_watching_folder()
-        print("[FolderWatcher] Stopped")
+        print("[FolderWatcher] Stopped", file=sys.stderr)

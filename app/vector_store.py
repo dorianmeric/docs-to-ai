@@ -9,6 +9,7 @@ from app.config import (
     EMBEDDING_MODEL,
     DEFAULT_SEARCH_RESULTS
 )
+import sys
 
 
 class VectorStore:
@@ -45,7 +46,7 @@ class VectorStore:
         )
 
         # Initialize embedding model
-        # print(f"Loading embedding model: {EMBEDDING_MODEL}")
+        print(f"Loading embedding model: {EMBEDDING_MODEL}", file=sys.stderr)
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
 
         # Get or create collection
@@ -54,7 +55,7 @@ class VectorStore:
             metadata={"description": "Document chunks with hierarchical topics"}
         )
 
-        # print(f"Vector store initialized. Documents in collection: {self.collection.count()}")
+        print(f"Vector store initialized. Documents in collection: {self.collection.count()}", file=sys.stderr)
 
         # Mark as initialized
         VectorStore._initialized = True
@@ -89,7 +90,7 @@ class VectorStore:
             metadatas.append(metadata)
         
         # Generate embeddings
-        # print(f"Generating embeddings for {len(texts)} chunks...")
+        print(f"Generating embeddings for {len(texts)} chunks...", file=sys.stderr)
         embeddings = self.embedding_model.encode(texts, show_progress_bar=True)
         
         # Add to collection (using upsert to prevent duplicates)
@@ -100,7 +101,7 @@ class VectorStore:
             metadatas=metadatas
         )
         
-        # print(f"Added {len(chunks)} chunks to vector store")
+        print(f"Added {len(chunks)} chunks to vector store", file=sys.stderr)
         return len(chunks)
     
     def _deserialize_metadata(self, metadata: Dict) -> Dict:
@@ -284,7 +285,7 @@ class VectorStore:
         # Delete
         if ids_to_delete:
             self.collection.delete(ids=ids_to_delete)
-            # print(f"Deleted {len(ids_to_delete)} chunks from {filepath}")
+            print(f"Deleted {len(ids_to_delete)} chunks from {filepath}", file=sys.stderr)
         
         return len(ids_to_delete)
     
@@ -316,7 +317,7 @@ class VectorStore:
         # Delete
         if ids_to_delete:
             self.collection.delete(ids=ids_to_delete)
-            # print(f"Deleted {len(ids_to_delete)} chunks from topic '{topic}'")
+            print(f"Deleted {len(ids_to_delete)} chunks from topic '{topic}'", file=sys.stderr)
         
         return len(ids_to_delete)
     
@@ -327,7 +328,7 @@ class VectorStore:
             name=CHROMA_COLLECTION_NAME,
             metadata={"description": "Document chunks with hierarchical topics"}
         )
-        # print("Vector store reset")
+        print("Vector store reset", file=sys.stderr)
 
 
 if __name__ == "__main__":
@@ -336,14 +337,14 @@ if __name__ == "__main__":
     
     # Print stats
     stats = store.get_stats()
-    print(f"\nVector Store Stats:")
-    print(f"Total chunks: {stats['total_chunks']}")
-    print(f"Total documents: {stats['total_documents']}")
-    print(f"Total topics: {stats['total_topics']}")
-    print(f"Documents: {stats['documents']}")
+    print(f"\nVector Store Stats:", file=sys.stderr)
+    print(f"Total chunks: {stats['total_chunks']}", file=sys.stderr)
+    print(f"Total documents: {stats['total_documents']}", file=sys.stderr)
+    print(f"Total topics: {stats['total_topics']}", file=sys.stderr)
+    print(f"Documents: {stats['documents']}", file=sys.stderr)
     
     # Test search
     if stats['total_chunks'] > 0:
         results = store.search("test query", n_results=3)
-        print(f"\nTest search returned {len(results)} results")
+    print(f"\nTest search returned {len(results)} results", file=sys.stderr)
 

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 import hashlib
 import json
+import sys
 from docx import Document as DocxDocument
 # import markdown ~ not used as we chose to stip the markdown formatting manually
 # from markdown.extensions import Extension
@@ -87,7 +88,7 @@ class DocumentProcessor:
             doc.close()
             
         except Exception as e:
-            print(f"Error processing PDF {pdf_path}: {e}")
+            print(f"Error processing PDF {pdf_path}: {e}", file=sys.stderr)
             return []
         
         return pages_data
@@ -130,7 +131,7 @@ class DocumentProcessor:
                         current_text = []
             
         except Exception as e:
-            print(f"Error processing Word document {docx_path}: {e}")
+            print(f"Error processing Word document {docx_path}: {e}", file=sys.stderr)
             return []
         
         return pages_data
@@ -183,7 +184,7 @@ class DocumentProcessor:
             })
             
         except Exception as e:
-            print(f"Error processing markdown file {md_path}: {e}")
+            print(f"Error processing markdown file {md_path}: {e}", file=sys.stderr)
             return []
         
         return pages_data
@@ -229,7 +230,7 @@ class DocumentProcessor:
                 })
             
         except Exception as e:
-            print(f"Error processing Excel file {excel_path}: {e}")
+            print(f"Error processing Excel file {excel_path}: {e}", file=sys.stderr)
             return []
         
         return pages_data
@@ -278,11 +279,11 @@ class DocumentProcessor:
         elif extension in ['.xlsx', '.xls', '.xlsam', '.xlsb']:
             pages_data = self.extract_text_from_excel(doc_path)
         else:
-            print(f"Unsupported file type: {extension}")
+            print(f"Unsupported file type: {extension}", file=sys.stderr)
             return []
         
 
-        print(f"\n⚠ File: {doc_path}, Found file_size = {file_size} bytes, last_modified = {last_modified} (after caching check)")
+        print(f"\n⚠ File: {doc_path}, Found file_size = {file_size} bytes, last_modified = {last_modified} (after caching check)", file=sys.stderr)
             
         # Add metadata to each page
         result = []
@@ -379,7 +380,7 @@ class DocumentProcessor:
                     item.unlink()
                 elif item.is_dir():
                     shutil.rmtree(item)
-            print("Document cache cleared (contents deleted, folder preserved)")
+            print("Document cache cleared (contents deleted, folder preserved)", file=sys.stderr)
     
     def _get_cache_path(self, doc_path: Path) -> Path:
         """Generate cache file path for a document."""
@@ -401,7 +402,7 @@ if __name__ == "__main__":
     test_doc = "test.pdf"  # Replace with actual document path
     if Path(test_doc).exists():
         chunks = processor.process_document(test_doc)
-        print(f"Extracted {len(chunks)} chunks from {test_doc}")
+        print(f"Extracted {len(chunks)} chunks from {test_doc}", file=sys.stderr)
         if chunks:
             print(f"\nFirst chunk preview:")
             print(f"Topics: {chunks[0]['metadata']['topics']}")

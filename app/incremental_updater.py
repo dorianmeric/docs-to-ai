@@ -9,6 +9,7 @@ from app.vector_store import VectorStore
 from app.config import TOPIC_SEPARATOR
 from mcp.types import TextContent
 import time
+import sys
 
 
 class IncrementalUpdater:
@@ -268,6 +269,7 @@ def process_incremental_changes(changes: List[Tuple[str, str]], doc_dir: str):
 
 
 if __name__ == "__main__":
+    pass
     # Test the incremental updater
-    print("This module is designed to be used by folder_watcher.py")
-    print("It processes incremental file changes (add, update, delete)")
+    print("This module is designed to be used by folder_watcher.py", file=sys.stderr)
+    print("It processes incremental file changes (add, update, delete)", file=sys.stderr)

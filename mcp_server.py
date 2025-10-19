@@ -9,6 +9,7 @@ information from a collection of documents stored in a vector database.
 import asyncio
 import subprocess
 import time
+import sys
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from app.vector_store import VectorStore
@@ -416,7 +417,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                             return scan_all_my_documents(doc_dir)
                     except Exception as e:
                         # Return error as TextContent for MCP response
-                        print(f"[MCP] Error during scan: {e}")
+                        print(f"[MCP] Error during scan: {e}", file=sys.stderr)
                         import traceback
                         traceback.print_exc()
                         return [TextContent(
@@ -561,17 +562,17 @@ async def startup_initialization():
         # Initialize the singleton VectorStore (will only initialize once)
         VectorStore()
 
-        # print("[MCP] Starting initialization...")
-        # print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}")
-        # print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}")
+        print("[MCP] Starting initialization...", file=sys.stderr)
+        print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}", file=sys.stderr)
+        print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}", file=sys.stderr)
 
         doc_dir = "/app/my-docs"  # Docker path
 
         # Check if we should do anything on boot
         if not FULL_SCAN_ON_BOOT and not FOLDER_WATCHER_ACTIVE_ON_BOOT:
-            # print("[MCP] ℹ Skipping startup scan and folder watcher (disabled via environment variables)")
-            # print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool")
-            # print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool")
+            print("[MCP]   Skipping startup scan and folder watcher (disabled via environment variables)", file=sys.stderr)
+            print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool", file=sys.stderr)
+            print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool", file=sys.stderr)
             return
 
         # Create a callback function for the folder watcher
@@ -586,7 +587,7 @@ async def startup_initialization():
                     # scan_all_my_documents uses singleton VectorStore
                     return scan_all_my_documents(doc_dir)
             except Exception as e:
-                print(f"[MCP] Error during scan: {e}")
+                print(f"[MCP] Error during scan: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()
                 from mcp.types import TextContent
@@ -598,38 +599,38 @@ async def startup_initialization():
         # Handle different combinations of environment variables
         if FOLDER_WATCHER_ACTIVE_ON_BOOT:
             # Start folder watcher with or without initial scan
-            print(f"[MCP] Starting folder watcher (initial scan: {FULL_SCAN_ON_BOOT})...")
+            print(f"[MCP] Starting folder watcher (initial scan: {FULL_SCAN_ON_BOOT})...", file=sys.stderr)
             result = start_watching_folder(scan_callback, do_initial_scan=FULL_SCAN_ON_BOOT)
 
             if result['status'] == 'started':
-                print(f"[MCP] ✓ Folder watcher started successfully")
-                print(f"[MCP]   Watching: {result['watch_path']}")
-                print(f"[MCP]   Debounce: {result['debounce_seconds']} seconds")
-                print(f"[MCP]   Full scan interval: {result['full_scan_interval_days']} days")
+                print(f"[MCP] ✓ Folder watcher started successfully", file=sys.stderr)
+                print(f"[MCP]   Watching: {result['watch_path']}", file=sys.stderr)
+                print(f"[MCP]   Debounce: {result['debounce_seconds']} seconds", file=sys.stderr)
+                print(f"[MCP]   Full scan interval: {result['full_scan_interval_days']} days", file=sys.stderr)
 
                 # Log scan result summary if available
                 if FULL_SCAN_ON_BOOT and 'scan_result' in result and result['scan_result']:
-                    print(f"[MCP] ✓ Initial scan completed. Result:")
-                    print(f"{result['scan_result']}")
+                    print(f"[MCP] ✓ Initial scan completed. Result:", file=sys.stderr)
+                    print(f"{result['scan_result']}", file=sys.stderr)
             else:
-                print(f"[MCP] ⚠ Warning: Failed to start folder watcher: {result.get('message', 'Unknown error')}")
-                print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool")
+                print(f"[MCP] ⚠ Warning: Failed to start folder watcher: {result.get('message', 'Unknown error')}", file=sys.stderr)
+                print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool", file=sys.stderr)
 
         elif FULL_SCAN_ON_BOOT:
             # Only do a full scan without starting the watcher
-            print("[MCP] Performing full scan (folder watcher disabled)...")
+            print("[MCP] Performing full scan (folder watcher disabled)...", file=sys.stderr)
             scan_result = scan_all_my_documents(doc_dir)
             if scan_result:
-                print(f"[MCP] ✓ Full scan completed")
-            print(f"[MCP]   Folder watcher is not active (disabled via environment variable)")
-            print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool")
+                print(f"[MCP] ✓ Full scan completed", file=sys.stderr)
+            print(f"[MCP]   Folder watcher is not active (disabled via environment variable)", file=sys.stderr)
+            print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool", file=sys.stderr)
 
         
 
     except Exception as e:
-        print(f"[MCP] ⚠ Warning: Error during startup initialization: {e}")
-        print(f"[MCP]   The server will continue, but automatic scanning/watching may not be active")
-        print(f"[MCP]   You can manually start features using the available tools")
+        print(f"[MCP] ⚠ Warning: Error during startup initialization: {e}", file=sys.stderr)
+        print(f"[MCP]   The server will continue, but automatic scanning/watching may not be active", file=sys.stderr)
+        print(f"[MCP]   You can manually start features using the available tools", file=sys.stderr)
         import traceback
         traceback.print_exc()
 
@@ -648,14 +649,7 @@ async def main_stdio():
             app.create_initialization_options()
         )
 
-    print("mcp_server.py -- MCP server is shutting down.")
-
-    # Stop folder watcher on shutdown
-    try:
-        stop_watching_folder()
-        print("[MCP] Folder watcher stopped")
-    except Exception as e:
-        print(f"[MCP] Error stopping folder watcher: {e}")
+    print("mcp_server.py -- MCP server is shutting down.", file=sys.stderr)
 
 
 async def main_websocket(host: str = "0.0.0.0", port: int = 38777):
@@ -694,9 +688,9 @@ async def main_websocket(host: str = "0.0.0.0", port: int = 38777):
         on_shutdown=[shutdown_handler]
     )
 
-    print(f"[MCP] Starting SSE/WebSocket server on {host}:{port}")
-    print(f"[MCP] SSE endpoint: http://{host}:{port}/sse")
-    print(f"[MCP] Messages endpoint: http://{host}:{port}/messages/")
+    print(f"[MCP] Starting SSE/WebSocket server on {host}:{port}", file=sys.stderr)
+    print(f"[MCP] SSE endpoint: http://{host}:{port}/sse", file=sys.stderr)
+    print(f"[MCP] Messages endpoint: http://{host}:{port}/messages/", file=sys.stderr)
 
     # Run the server
     config = uvicorn.Config(
@@ -711,12 +705,12 @@ async def main_websocket(host: str = "0.0.0.0", port: int = 38777):
 
 async def shutdown_handler():
     """Handle server shutdown."""
-    print("[MCP] Server is shutting down...")
-    try:
-        stop_watching_folder()
-        print("[MCP] Folder watcher stopped")
-    except Exception as e:
-        print(f"[MCP] Error stopping folder watcher: {e}")
+    print("[MCP] Server is shutting down...", file=sys.stderr)
+    # try:
+    #     stop_watching_folder()
+    #     print("[MCP] Folder watcher stopped")
+    # except Exception as e:
+    #     print(f"[MCP] Error stopping folder watcher: {e}")
 
 
 def main():
