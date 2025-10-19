@@ -54,7 +54,7 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies only (cached)
 RUN uv sync --no-install-project
 
-# Copy app code
+# Copy app code (while not copying any file mentioned in the .dockerignore)
 COPY . .
 
 # Expose HTTP port

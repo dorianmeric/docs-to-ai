@@ -7,7 +7,6 @@ from typing import List, Tuple
 from app.document_processor import DocumentProcessor
 from app.vector_store import VectorStore
 from app.config import TOPIC_SEPARATOR
-from mcp.types import TextContent
 import time
 import sys
 
@@ -262,10 +261,7 @@ def process_incremental_changes(changes: List[Tuple[str, str]], doc_dir: str):
     response_parts.append(f"\nUpdate completed in {duration:.2f} seconds")
     response_parts.append("="*60)
 
-    return [TextContent(
-        type="text",
-        text="\n".join(response_parts)
-    )]
+    return f"\n".join(response_parts)
 
 
 if __name__ == "__main__":

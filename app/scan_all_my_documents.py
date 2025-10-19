@@ -4,10 +4,8 @@ from app.document_processor import DocumentProcessor
 from app.vector_store import VectorStore
 from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
 import sys
-from mcp.types import Tool, TextContent
 
-
-def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
+def scan_all(doc_dir: str = DOCS_DIR, reset_database: bool = True):
     """
     Ingest all documents (PDFs, Word, Markdown, Excel) from a directory into the vector store.
     Uses folder structure to tag documents with hierarchical topics.
@@ -29,10 +27,7 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
 
     if not doc_path.exists():
         response_parts.append(f"Error: Directory {doc_dir} does not exist")
-        return [TextContent(
-            type="text",
-            text="\n".join(response_parts)
-        )]
+        return f"\n".join(response_parts)
 
     # Debug: Check if directory is readable
     response_parts.append(f"Scanning directory: {doc_path.absolute()}")
@@ -75,10 +70,7 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
         response_parts.append(f"\n⚠ No supported documents found in {doc_dir}.")
         response_parts.append(f"Supported extensions: {', '.join(SUPPORTED_EXTENSIONS)} (case-insensitive)")
         response_parts.append(f"Please add documents to {doc_path.absolute()} and scan again.")
-        return [TextContent(
-            type="text",
-            text="\n".join(response_parts)
-        )]
+        return f"\n".join(response_parts)
 
     response_parts.append(f"\n{'='*60}")
     response_parts.append(f"DOCUMENT SCAN STARTING")
@@ -210,10 +202,7 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
 
     response_parts.append(f"\n✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)")
 
-    return [TextContent(
-                type="text",
-                text="\n".join(response_parts)
-            )]
+    return f"\n".join(response_parts)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -241,7 +230,7 @@ def main():
         store.reset()
     
     # Ingest documents
-    scan_all_my_documents(args.doc_dir)
+    scan_all(args.doc_dir)
 
 
 if __name__ == "__main__":

@@ -10,8 +10,7 @@ import asyncio
 import subprocess
 import time
 import sys
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from fastmcp import FastMCP
 from app.vector_store import VectorStore
 from app.config import (
     DEFAULT_SEARCH_RESULTS,
@@ -27,7 +26,7 @@ from app.folder_watcher import (
     trigger_full_scan_if_needed
 )
 from app.incremental_updater import process_incremental_changes
-from app.scan_all_my_documents import scan_all_my_documents
+from app.scan_all_my_documents import scan_all
 
 # Initialize server
 mcp = FastMCP("docs-to-ai")
@@ -286,7 +285,7 @@ def scan_all_my_documents() -> str:
         doc_dir = "/app/my-docs"  # Docker path
         # scan_all_my_documents uses the singleton VectorStore internally
         # Returns list[TextContent] with debug info
-        result = scan_all_my_documents(doc_dir)
+        result = scan_all(doc_dir)
         # Extract text from TextContent objects
         if isinstance(result, list) and result:
             return "\n".join(item.text for item in result if hasattr(item, 'text'))
@@ -318,16 +317,13 @@ def start_watching_folder() -> str:
                 else:
                     # Do a full scan with database reset to prevent duplicates
                     # run_full_document_scan uses singleton VectorStore
-                    return scan_all_my_documents(doc_dir)
+                    return scan_all(doc_dir)
             except Exception as e:
                 # Return error as TextContent for MCP response
                 print(f"[MCP] Error during scan: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()
-                return [TextContent(
-                    type="text",
-                    text=f"✗ Error during scan: {str(e)}"
-                )]
+                return f"✗ Error during scan: {str(e)}"
 
         # Start watching the folder with initial scan
         result = start_folder_watcher(scan_callback, do_initial_scan=True)
@@ -619,8 +615,8 @@ async def main():
             i += 1
 
     # Run the appropriate transport
-    stdio_task = asyncio.create_task(app.run_stdio())
-    http_task = asyncio.create_task(app.run_http(host=host, port=port))
+    stdio_task = asyncio.create_task(mcp.run_stdio())
+    http_task = asyncio.create_task(mcp.run_http(host=host, port=port))
     
     # Wait for either to stop
     await asyncio.wait([stdio_task, http_task], return_when=asyncio.FIRST_COMPLETED)

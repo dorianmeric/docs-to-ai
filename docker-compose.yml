@@ -19,10 +19,10 @@ services:
       # Startup behavior control (defaults to True if not set)
       - FULL_SCAN_ON_BOOT=${FULL_SCAN_ON_BOOT:-False}
       - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-False}
-      # MCP server transport configuration
-      - MCP_TRANSPORT=${MCP_TRANSPORT:-stdio}
-      - MCP_HOST=${MCP_HOST:-0.0.0.0}
-      - MCP_PORT=${MCP_PORT:-38777}
+      # # MCP server transport configuration
+      # - MCP_TRANSPORT=${MCP_TRANSPORT:-stdio}
+      # - MCP_HOST=${MCP_HOST:-0.0.0.0}
+      # - MCP_PORT=${MCP_PORT:-38777}
         
     # Stdin/stdout for MCP protocol (needed for stdio mode)
     stdin_open: true
