@@ -613,14 +613,12 @@ async def main():
         else:
             i += 1
 
-    # Run the appropriate transport
-    stdio_task = asyncio.create_task(mcp.run_stdio())
-    http_task = asyncio.create_task(mcp.run_http(host=host, port=port))
-    
+   # Run the appropriate transport
+    stdio_task = asyncio.create_task(mcp.run_stdio_async())
+    http_task = asyncio.create_task(mcp.run_http_async(host=host, port=port))
+
     # Wait for either to stop
     await asyncio.wait([stdio_task, http_task], return_when=asyncio.FIRST_COMPLETED)
-
-
 
 if __name__ == "__main__":
     asyncio.run(main())
