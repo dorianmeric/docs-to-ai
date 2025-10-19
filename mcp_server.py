@@ -17,7 +17,10 @@ from app.config import (
     MAX_SEARCH_RESULTS,
     TOPIC_SEPARATOR,
     FULL_SCAN_ON_BOOT,
-    FOLDER_WATCHER_ACTIVE_ON_BOOT
+    FOLDER_WATCHER_ACTIVE_ON_BOOT,
+    MCP_TRANSPORT,
+    MCP_HOST,
+    MCP_PORT
 )
 from app.folder_watcher import (
     start_watching_folder, 
@@ -634,8 +637,8 @@ async def startup_initialization():
         traceback.print_exc()
 
 
-async def main():
-    """Run the MCP server."""
+async def main_stdio():
+    """Run the MCP server via stdio."""
     from mcp.server.stdio import stdio_server
 
     # Perform startup initialization
@@ -658,6 +661,116 @@ async def main():
         print(f"[MCP] Error stopping folder watcher: {e}")
 
 
+async def main_websocket(host: str = MCP_HOST, port: int = MCP_PORT):
+    """Run the MCP server via SSE/WebSocket over HTTP."""
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.routing import Route, Mount
+    from starlette.responses import Response
+    import uvicorn
+
+    # Perform startup initialization
+    await startup_initialization()
+
+    # Create SSE transport
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        """Handle SSE connection requests."""
+        async with sse.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await app.run(
+                streams[0], streams[1], app.create_initialization_options()
+            )
+        return Response()
+
+    # Create Starlette routes
+    routes = [
+        Route("/sse", endpoint=handle_sse, methods=["GET"]),
+        Mount("/messages/", app=sse.handle_post_message),
+    ]
+
+    # Create Starlette app
+    starlette_app = Starlette(
+        routes=routes,
+        on_shutdown=[shutdown_handler]
+    )
+
+    print(f"[MCP] Starting SSE/WebSocket server on {host}:{port}")
+    print(f"[MCP] SSE endpoint: http://{host}:{port}/sse")
+    print(f"[MCP] Messages endpoint: http://{host}:{port}/messages/")
+
+    # Run the server
+    config = uvicorn.Config(
+        starlette_app,
+        host=host,
+        port=port,
+        log_level="info"
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def shutdown_handler():
+    """Handle server shutdown."""
+    print("[MCP] Server is shutting down...")
+    try:
+        stop_watching_folder()
+        print("[MCP] Folder watcher stopped")
+    except Exception as e:
+        print(f"[MCP] Error stopping folder watcher: {e}")
+
+
+def main():
+    """Main entry point - determine transport type from environment or arguments."""
+    import sys
+
+    # Check for transport type from config (which reads environment variable)
+    transport = MCP_TRANSPORT
+
+    # Allow command line override
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ["--websocket", "--sse", "--http"]:
+            transport = "websocket"
+        elif sys.argv[1] == "--stdio":
+            transport = "stdio"
+        elif sys.argv[1] == "--help":
+            print("Usage: python mcp_server.py [OPTIONS]")
+            print("\nOptions:")
+            print("  --stdio              Use stdio transport (default)")
+            print("  --websocket, --sse   Use SSE/WebSocket transport over HTTP")
+            print("  --host HOST          Host to bind to (default: 0.0.0.0)")
+            print("  --port PORT          Port to bind to (default: 38777)")
+            print("\nEnvironment Variables:")
+            print("  MCP_TRANSPORT        Transport type: 'stdio' or 'websocket'")
+            print("  MCP_HOST             Host to bind to (websocket mode)")
+            print("  MCP_PORT             Port to bind to (websocket mode)")
+            sys.exit(0)
+
+    # Get host and port for websocket mode from config
+    host = MCP_HOST
+    port = MCP_PORT
+
+    # Parse additional command line arguments
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] == "--host" and i + 1 < len(sys.argv):
+            host = sys.argv[i + 1]
+            i += 2
+        elif sys.argv[i] == "--port" and i + 1 < len(sys.argv):
+            port = int(sys.argv[i + 1])
+            i += 2
+        else:
+            i += 1
+
+    # Run the appropriate transport
+    if transport == "websocket":
+        asyncio.run(main_websocket(host=host, port=port))
+    else:
+        asyncio.run(main_stdio())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
 

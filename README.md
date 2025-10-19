@@ -58,8 +58,31 @@ pdfs/
 ```bash
 pip install -r requirements.txt  # Install dependencies:
 python -m app.scan_all_my_documents  #  Ingest PDFs
-python mcp_server.py #  Start the MCP Server
+python mcp_server.py #  Start the MCP Server (stdio mode by default)
 ```
+
+### WebSocket/SSE Mode
+
+The MCP server can run in two modes:
+- **stdio mode** (default) - For local connections via Claude Desktop
+- **WebSocket/SSE mode** - For remote connections over HTTP
+
+To run in WebSocket mode:
+
+```bash
+# Using command line arguments
+python mcp_server.py --websocket --host 0.0.0.0 --port 38777
+
+# Or using environment variables
+export MCP_TRANSPORT=websocket
+export MCP_HOST=0.0.0.0
+export MCP_PORT=38777
+python mcp_server.py
+```
+
+The server will expose two endpoints:
+- SSE endpoint: `http://host:port/sse` (for establishing connections)
+- Messages endpoint: `http://host:port/messages/` (for sending requests)
 
 The script will:
 - Recursively scan the directory
@@ -95,12 +118,25 @@ Documents per topic:
 
 Add to your Claude Desktop config (`claude_desktop_config.json`):
 
+**For stdio mode (local):**
 ```json
 {
   "mcpServers": {
     "docs-to-ai": {
       "command": "python",
       "args": ["C:/[UPDATE_PATH_TO_DOCS-TO-AI]/docs-to-ai/mcp_server.py"]
+    }
+  }
+}
+```
+
+**For WebSocket/SSE mode (remote):**
+```json
+{
+  "mcpServers": {
+    "docs-to-ai": {
+      "url": "http://your-server-host:8765/sse",
+      "transport": "sse"
     }
   }
 }

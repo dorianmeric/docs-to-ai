@@ -43,7 +43,9 @@ USER appuser
 
 # Add local Python packages to PATH
 ENV PATH=/home/appuser/.local/bin:$PATH
-ENV PYTHONUNBUFFERED=1
+
+# ensures that the python output i.e. the stdout and stderr streams are sent straight to terminal (e.g. your container log) without being first buffered
+ENV PYTHONUNBUFFERED=1  
 
 # Expose any ports if needed (not required for MCP stdio)
 # EXPOSE 8000

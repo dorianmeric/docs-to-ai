@@ -41,3 +41,13 @@ FULL_SCAN_ON_BOOT = os.getenv('FULL_SCAN_ON_BOOT', 'True').lower() in ('true', '
 # Controls whether the folder watcher should be activated when the MCP server starts
 FOLDER_WATCHER_ACTIVE_ON_BOOT = os.getenv('FOLDER_WATCHER_ACTIVE_ON_BOOT', 'True').lower() in ('true', '1', 'yes', 'on')
 
+# MCP Server Transport Configuration
+# Controls the transport method for MCP server: 'stdio' for local connections, 'websocket' for network connections
+MCP_TRANSPORT = os.getenv('MCP_TRANSPORT', 'websocket').lower()
+
+# Host to bind to when using websocket/SSE transport
+MCP_HOST = os.getenv('MCP_HOST', '0.0.0.0')
+
+# Port to bind to when using websocket/SSE transport
+MCP_PORT = int(os.getenv('MCP_PORT', '38777'))
+

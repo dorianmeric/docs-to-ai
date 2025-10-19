@@ -4,4 +4,7 @@ pymupdf==1.26.5
 python_docx==1.2.0
 sentence_transformers==5.1.1
 watchdog==6.0.0
-mcp==1.17.0
+mcp==1.18.0
+starlette==0.48.0
+uvicorn[standard]==0.38.0
+websockets==15.0.1
