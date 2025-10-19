@@ -236,7 +236,7 @@ def main():
     
     # Reset if requested
     if args.reset:
-        print("Resetting vector store...")
+        # print("Resetting vector store...")
         store = VectorStore()
         store.reset()
     
