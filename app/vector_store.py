@@ -46,7 +46,7 @@ class VectorStore:
         )
 
         # Initialize embedding model
-        print(f"Loading embedding model: {EMBEDDING_MODEL}", file=sys.stderr)
+        # print(f"Loading embedding model: {EMBEDDING_MODEL}", file=sys.stderr)
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
 
         # Get or create collection
@@ -55,7 +55,7 @@ class VectorStore:
             metadata={"description": "Document chunks with hierarchical topics"}
         )
 
-        print(f"Vector store initialized. Documents in collection: {self.collection.count()}", file=sys.stderr)
+        print(f"Vector store initialized. Documents chunks in collection: {self.collection.count()}", file=sys.stderr)
 
         # Mark as initialized
         VectorStore._initialized = True

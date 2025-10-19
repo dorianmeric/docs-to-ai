@@ -562,7 +562,7 @@ async def startup_initialization():
         # Initialize the singleton VectorStore (will only initialize once)
         VectorStore()
 
-        print("[MCP] Starting initialization...", file=sys.stderr)
+        # print(f"[MCP] Starting initialization...", file=sys.stderr)
         print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}", file=sys.stderr)
         print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}", file=sys.stderr)
 
@@ -570,9 +570,9 @@ async def startup_initialization():
 
         # Check if we should do anything on boot
         if not FULL_SCAN_ON_BOOT and not FOLDER_WATCHER_ACTIVE_ON_BOOT:
-            print("[MCP]   Skipping startup scan and folder watcher (disabled via environment variables)", file=sys.stderr)
-            print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool", file=sys.stderr)
-            print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool", file=sys.stderr)
+            # print("[MCP]   Skipping startup scan and folder watcher (disabled via environment variables)", file=sys.stderr)
+            # print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool", file=sys.stderr)
+            # print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool", file=sys.stderr)
             return
 
         # Create a callback function for the folder watcher
