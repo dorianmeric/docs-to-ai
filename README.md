@@ -135,7 +135,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 {
   "mcpServers": {
     "docs-to-ai": {
-      "url": "http://your-server-host:8765/sse",
+      "url": "http://0.0.0.0.0:38777/sse",
       "transport": "sse"
     }
   }
@@ -156,7 +156,7 @@ services:
       - ./cache/doc_cache:/app/doc_cache      # Document cache (persists extracted text)
       - ./my-docs:/app/my-docs:ro             # Documents directory (your PDFs and Word docs). Read-only to prevent accidental modifications
     
-    # Stdin/stdout - required for MCP protocol
+    # Stdin/stdout - required for MCP protocol in stdio mode
     stdin_open: true
     tty: true
 
@@ -188,10 +188,11 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
     "docs-to-ai": {
       "command": "docker",
       "args": [
-        "run",
+        "exec",
         "-i",
-        "--rm",
-        "dmeric/docs-to-ai"
+        "docs-to-ai",
+        "python",
+        "mcp_server.py"
       ]
     }
 

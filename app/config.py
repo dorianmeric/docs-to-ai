@@ -36,14 +36,14 @@ CHROMA_COLLECTION_NAME =  os.getenv('CHROMA_COLLECTION_NAME', "my-documents" )# 
 
 # MCP Server Startup Configuration
 # Controls whether a full scan should be performed when the MCP server starts
-FULL_SCAN_ON_BOOT = os.getenv('FULL_SCAN_ON_BOOT', 'True').lower() in ('true', '1', 'yes', 'on')
+FULL_SCAN_ON_BOOT = os.getenv('FULL_SCAN_ON_BOOT', 'False').lower() in ('true', '1', 'yes', 'on')
 
 # Controls whether the folder watcher should be activated when the MCP server starts
-FOLDER_WATCHER_ACTIVE_ON_BOOT = os.getenv('FOLDER_WATCHER_ACTIVE_ON_BOOT', 'True').lower() in ('true', '1', 'yes', 'on')
+FOLDER_WATCHER_ACTIVE_ON_BOOT = os.getenv('FOLDER_WATCHER_ACTIVE_ON_BOOT', 'False').lower() in ('true', '1', 'yes', 'on')
 
 # MCP Server Transport Configuration
 # Controls the transport method for MCP server: 'stdio' for local connections, 'websocket' for network connections
-MCP_TRANSPORT = os.getenv('MCP_TRANSPORT', 'websocket').lower()
+MCP_TRANSPORT = os.getenv('MCP_TRANSPORT', 'stdio').lower()
 
 # Host to bind to when using websocket/SSE transport
 MCP_HOST = os.getenv('MCP_HOST', '0.0.0.0')

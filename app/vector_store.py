@@ -180,7 +180,10 @@ class VectorStore:
             List of dicts with 'filename', 'topics', 'filepath', and 'filetype'
         """
         # Get all documents
-        all_docs = self.collection.get()
+        try:
+            all_docs = self.collection.get()
+        except Exception as e: # if the collection is not found
+            return {}
         
         # Extract unique documents (by filepath)
         documents = {}

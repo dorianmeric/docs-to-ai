@@ -2,16 +2,17 @@
   "mcpServers": {
 
 
-    "docs-to-ai": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-		    "--rm",
-        "mcp/docs-to-ai"
-      ]
-    }
+        "docs-to-ai": {
+                "command": "docker",
+                "args": [
+                    "exec",
+                    "-i",
+                    "docs-to-ai",
+                    "python",
+                    "mcp_server.py"
+                ]
+        }
 
-    
+
   }
 }

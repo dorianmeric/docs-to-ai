@@ -17,10 +17,7 @@ from app.config import (
     MAX_SEARCH_RESULTS,
     TOPIC_SEPARATOR,
     FULL_SCAN_ON_BOOT,
-    FOLDER_WATCHER_ACTIVE_ON_BOOT,
-    MCP_TRANSPORT,
-    MCP_HOST,
-    MCP_PORT
+    FOLDER_WATCHER_ACTIVE_ON_BOOT
 )
 from app.folder_watcher import (
     start_watching_folder, 
@@ -564,17 +561,17 @@ async def startup_initialization():
         # Initialize the singleton VectorStore (will only initialize once)
         VectorStore()
 
-        print("[MCP] Starting initialization...")
-        print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}")
-        print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}")
+        # print("[MCP] Starting initialization...")
+        # print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}")
+        # print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}")
 
         doc_dir = "/app/my-docs"  # Docker path
 
         # Check if we should do anything on boot
         if not FULL_SCAN_ON_BOOT and not FOLDER_WATCHER_ACTIVE_ON_BOOT:
-            print("[MCP] ℹ Skipping startup scan and folder watcher (disabled via environment variables)")
-            print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool")
-            print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool")
+            # print("[MCP] ℹ Skipping startup scan and folder watcher (disabled via environment variables)")
+            # print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool")
+            # print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool")
             return
 
         # Create a callback function for the folder watcher
@@ -661,7 +658,7 @@ async def main_stdio():
         print(f"[MCP] Error stopping folder watcher: {e}")
 
 
-async def main_websocket(host: str = MCP_HOST, port: int = MCP_PORT):
+async def main_websocket(host: str = "0.0.0.0", port: int = 38777):
     """Run the MCP server via SSE/WebSocket over HTTP."""
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
@@ -725,9 +722,10 @@ async def shutdown_handler():
 def main():
     """Main entry point - determine transport type from environment or arguments."""
     import sys
+    import os
 
-    # Check for transport type from config (which reads environment variable)
-    transport = MCP_TRANSPORT
+    # Check for transport type from environment variable or command line
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
 
     # Allow command line override
     if len(sys.argv) > 1:
@@ -748,9 +746,9 @@ def main():
             print("  MCP_PORT             Port to bind to (websocket mode)")
             sys.exit(0)
 
-    # Get host and port for websocket mode from config
-    host = MCP_HOST
-    port = MCP_PORT
+    # Get host and port for websocket mode
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "38777"))
 
     # Parse additional command line arguments
     i = 1

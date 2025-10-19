@@ -117,7 +117,11 @@ def scan_all_my_documents(doc_dir: str = DOCS_DIR, reset_database: bool = True):
     if reset_database:
         response_parts.append(f"\n  {ext}: {count} files")
         response_parts.append("\n⚠ Resetting vector store (clearing all existing documents)...")
-        vector_store.reset()
+        try:
+            vector_store.reset()
+        except Exception as e:
+            response_parts.append("✓ Vector store did not exist yet, skipping")
+            
         response_parts.append("✓ Vector store reset complete")
         
         # Clear document cache to ensure fresh extraction
