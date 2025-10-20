@@ -1,0 +1,35 @@
+# make sure you're on main and up-to-date (optional but recommended)
+git checkout main
+git pull origin main
+
+# create and switch to the new branch
+git checkout -b "my branch"
+
+
+
+# COMMITS 
+
+
+
+# When ready to merge the branch,
+# switch back to main and update it
+git checkout main
+git pull origin main
+
+# create a single squashed commit from the branch
+git merge --squash "my branch"
+
+# stage the squashed changes and commit once with your chosen message
+git commit -m "feat: combined changes from 'my branch'"
+
+# push the single commit to remote main
+git push origin main
+
+
+
+
+
+# After the branch has been merged, delete it locally
+git branch -d "my branch"
+# And delete it remotely
+git push origin --delete "my branch"
