@@ -80,8 +80,8 @@ The MCP server now runs **BOTH transports concurrently** (thanks to FastMCP):
 - **HTTP/SSE mode** - For remote connections over HTTP
 
 Both are active simultaneously by default. The server automatically exposes:
-- SSE endpoint: `http://0.0.0.0:38777/sse` (for establishing connections)
-- Messages endpoint: `http://0.0.0.0:38777/messages/` (for sending requests)
+- SSE endpoint: `http://localhost:38777/sse` (for establishing connections)
+- Messages endpoint: `http://localhost:38777/messages/` (for sending requests)
 
 You can customize the HTTP transport using command line arguments or environment variables:
 
@@ -146,7 +146,7 @@ Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "docs-to-ai": {
-      "url": "http://0.0.0.0:38777/sse",
+      "url": "http://localhost:38777/sse",
       "transport": "sse"
     }
   }
@@ -173,7 +173,7 @@ services:
     tty: true
 
     ports:
-      - "${MCP_PORT:-38777}:38777"            # for http/sse transport, on http://0.0.0.0:38777/sse
+      - "${MCP_PORT:-38777}:38777"            # for http/sse transport, on http://localhost:38777/sse
 
     # Restart policy
     restart: unless-stopped

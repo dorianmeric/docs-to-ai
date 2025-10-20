@@ -51,9 +51,10 @@ WORKDIR /app
 # Copy manifests first for caching
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies only (cached). --locked to ensure the dependencies in the lock file are used. 
+# Install dependencies only (cached). --locked to ensure the dependencies in the lock file are used.  The path to the uv cache is on the image, and gets saved in the Windows folder: C:\Users\<You>\AppData\Local\uv\Cache
 ENV UV_LINK_MODE=copy
-RUN --mount=type=cache,target="C:/Temp/uv-cache" uv sync --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv  uv sync --no-install-project
+
 
 # Copy app code (while not copying any file mentioned in the .dockerignore)
 COPY . .
