@@ -1,6 +1,6 @@
 # Docs-to-AI -- PDF/Word Document Query System with MCP
 
-A Model Context Protocol (MCP) server that enables LLMs (like Clause or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
+A Model Context Protocol (MCP) server that enables LLMs (like Claude Desktop or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
 Supports: PDF, Word, Excel, Markdown.
 Supported extensions: .pdf, .docx, .doc, .xlsx, .xls, .xlsam, .xlsb, .md
 
