@@ -1,6 +1,6 @@
 [project]
 name = "docs-to-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Model Context Protocol (MCP) server that enables LLMs (like Clause or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure. Supports: PDF, Word, Excel, Markdown."
 readme = "README.md"
 requires-python = ">=3.13"

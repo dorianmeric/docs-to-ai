@@ -29,8 +29,8 @@ services:
     tty: false
 
     # # # Port mapping for websocket/SSE mode
-    # ports:
-    #   - "${MCP_PORT:-38777}:38777"
+    ports:
+      - "${MCP_PORT:-38777}:38777"
 
     # Restart policy
     restart: unless-stopped
