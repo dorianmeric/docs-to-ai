@@ -55,39 +55,50 @@ pdfs/
 
 ## 1. Installation, with local python
 
+This project uses `uv` for fast, reliable Python package management.
+
+### Install uv (if not already installed)
 ```bash
-pip install -r requirements.txt  # Install dependencies:
-python -m app.scan_all_my_documents  #  Ingest PDFs
-python mcp_server.py #  Start the MCP Server (stdio mode by default)
+# On macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# On Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### WebSocket/SSE Mode
+### Install and run
+```bash
+uv sync                              # Install dependencies from pyproject.toml
+python -m app.scan_all_my_documents  # Ingest documents
+python mcp_server.py                 # Start the MCP Server
+```
 
-The MCP server can run in two modes:
-- **stdio mode** (default) - For local connections via Claude Desktop
-- **WebSocket/SSE mode** - For remote connections over HTTP
+### Dual Transport Mode
 
-To run in WebSocket mode:
+The MCP server now runs **BOTH transports concurrently** (thanks to FastMCP):
+- **stdio mode** - For local connections via Claude Desktop
+- **HTTP/SSE mode** - For remote connections over HTTP
+
+Both are active simultaneously by default. The server automatically exposes:
+- SSE endpoint: `http://0.0.0.0:38777/sse` (for establishing connections)
+- Messages endpoint: `http://0.0.0.0:38777/messages/` (for sending requests)
+
+You can customize the HTTP transport using command line arguments or environment variables:
 
 ```bash
 # Using command line arguments
-python mcp_server.py --websocket --host 0.0.0.0 --port 38777
+python mcp_server.py --host 0.0.0.0 --port 38777
 
 # Or using environment variables
-export MCP_TRANSPORT=websocket
 export MCP_HOST=0.0.0.0
 export MCP_PORT=38777
 python mcp_server.py
 ```
 
-The server will expose two endpoints:
-- SSE endpoint: `http://host:port/sse` (for establishing connections)
-- Messages endpoint: `http://host:port/messages/` (for sending requests)
-
 The script will:
 - Recursively scan the directory
 - Detect topics from folder names
-- Extract and chunk text from each PDF
+- Extract and chunk text from each PDF/Words/Markdown/Excel
 - Tag chunks with their topic
 - Store everything in chromadb
 
@@ -116,7 +127,7 @@ Documents per topic:
   Python_Programming: 5 documents, 133 chunks
 ```
 
-Add to your Claude Desktop config (`claude_desktop_config.json`):
+Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`):
 
 **For stdio mode (local):**
 ```json
@@ -130,12 +141,12 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 }
 ```
 
-**For WebSocket/SSE mode (remote):**
+**For HTTP/SSE mode (remote):**
 ```json
 {
   "mcpServers": {
     "docs-to-ai": {
-      "url": "http://0.0.0.0.0:38777/sse",
+      "url": "http://0.0.0.0:38777/sse",
       "transport": "sse"
     }
   }
@@ -143,7 +154,8 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 ```
 
 
-## 2. Installation, with docker
+## 2. Installation, with Docker
+
 You need Docker Desktop, or Docker Engine, running. Then just write the following into a file called "docker-compose.yaml":
 ````yaml
 services:
@@ -159,6 +171,9 @@ services:
     # Stdin/stdout - required for MCP protocol in stdio mode
     stdin_open: true
     tty: true
+
+    ports:
+      - "${MCP_PORT:-38777}:38777"
 
     # Restart policy
     restart: unless-stopped
@@ -179,7 +194,35 @@ then run, in bash or in Powershell:
 docker compose up -d
 ````
 
-Add to your Claude Desktop config (`claude_desktop_config.json`):
+### Docker Configuration
+
+The `docker-compose.yml` configures:
+
+**Volumes:**
+- `./cache/chromadb:/app/cache/chromadb` - Vector store database (persistent)
+- `./cache/doc_cache:/app/cache/doc_cache` - Document cache (persistent)
+- `./my-docs:/app/my-docs:ro` - Your documents directory (read-only)
+
+**Ports:**
+- `38777` - HTTP/SSE endpoint for remote MCP connections
+
+**Environment Variables:**
+- `FULL_SCAN_ON_BOOT` - Set to `True` to scan documents on startup (default: `False`)
+- `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Set to `True` to start folder watcher on startup (default: `False`)
+- `MCP_PORT` - Customize HTTP port (default: `38777`)
+
+Example with custom environment variables:
+```bash
+# Create a .env file
+echo "FULL_SCAN_ON_BOOT=True" > .env
+echo "FOLDER_WATCHER_ACTIVE_ON_BOOT=True" >> .env
+echo "MCP_PORT=38777" >> .env
+
+# Start with environment variables
+docker compose up -d
+```
+
+Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`):
 
 ```json
 {
@@ -206,19 +249,32 @@ You should now be able to ask your LLM questions about the documents.
 
 ## Project Structure
 
-- `mcp_server.py` - Main MCP server implementation
-- `document_processor.py` - PDF text extraction and chunking
-- `vector_store.py` - Vector database operations
-- `scan_all_my_documentss.py` - Batch PDF ingestion script
-- `requirements.txt` - Python dependencies
-- `config.py` - Configuration settings
+- `mcp_server.py` - Main MCP server implementation (FastMCP-based)
+- `app/document_processor.py` - Document text extraction and chunking (PDF, Word, Excel, Markdown)
+- `app/vector_store.py` - Vector database operations (ChromaDB)
+- `app/scan_all_my_documents.py` - Batch document ingestion script
+- `app/incremental_updater.py` - Incremental document update logic
+- `app/folder_watcher.py` - Automatic folder monitoring and change detection
+- `app/config.py` - Configuration settings
+- `pyproject.toml` - Python dependencies and project metadata (using `uv`)
+- `Dockerfile` - Docker container configuration
+- `docker-compose.yml` - Docker Compose configuration
 
 ## MCP Tools
 
-- `search_documents` - Semantic search across all PDFs (with optional topic filter)
+The server exposes the following tools for LLMs:
+
+**Search & Discovery:**
+- `search_documents` - Semantic search across all documents (with optional topic filter)
 - `list_documents` - List all available documents (with optional topic filter)
 - `list_topics` - List all topics/categories
-- `get_collection_stats` - Get statistics about the collection
+- `get_collection_stats` - Get statistics about the collection (file types, sizes, counts)
+
+**Document Management:**
+- `scan_all_my_documents` - Manually trigger a full document scan and re-index
+- `start_watching_folder` - Start automatic folder monitoring with incremental updates
+- `stop_watching_folder` - Stop the folder watcher
+- `get_time_of_last_folder_scan` - Check when the last scan occurred and status
 
 ### Example Queries for Claude
 
@@ -228,6 +284,7 @@ Once configured, you can ask Claude:
 - "What documents do you have access to?"
 - "What topics are available?"
 - "Search for information about neural networks"
+- "Show me the collection statistics"
 
 **Topic-specific queries:**
 - "Search for Python programming concepts in the Python_Programming topic"
@@ -239,24 +296,47 @@ Once configured, you can ask Claude:
 - "Find all mentions of pandas across all documents"
 - "What are the key concepts in the Machine_Learning documents?"
 
+**Document management:**
+- "Scan all my documents" - Triggers a full re-index
+- "Start watching my documents folder for changes" - Enables automatic updates
+- "When was the last scan?" - Check folder monitoring status
+- "Stop watching the folder" - Disable automatic updates
+
 ## Configuration
 
-Edit `config.py` to customize:
-- Chunk size and overlap
-- Number of search results
-- Embedding model
-- chromadb persistence directory
-- Topic extraction behavior (enable/disable folder-based topics)
+Edit [app/config.py](app/config.py) to customize:
 
-### Topic Configuration
+**Document Processing:**
+- `SUPPORTED_EXTENSIONS` - File types to process (default: `.pdf`, `.docx`, `.doc`, `.md`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb`)
+- `CHUNK_SIZE` - Characters per chunk (default: `1000`)
+- `CHUNK_OVERLAP` - Overlap between chunks (default: `200`)
 
-By default, the system uses folder names as topics. To modify:
+**Search Configuration:**
+- `DEFAULT_SEARCH_RESULTS` - Default number of results (default: `10`)
+- `MAX_SEARCH_RESULTS` - Maximum allowed results (default: `20`)
 
-```python
-# config.py
-USE_FOLDER_AS_TOPIC = True  # Set to False to disable topic extraction
-DEFAULT_TOPIC = "uncategorized"  # Default topic for PDFs not in folders
-```
+**Embedding Model:**
+- `EMBEDDING_MODEL` - Sentence transformer model (default: `all-MiniLM-L6-v2`)
+- `EMBEDDING_DIMENSION` - Vector dimension (default: `384`)
+
+**Topic Configuration:**
+- `USE_FOLDER_AS_TOPIC` - Use folder hierarchy as topics (default: `True`)
+- `DEFAULT_TOPIC` - Default topic for uncategorized docs (default: `uncategorized`)
+- `TOPIC_SEPARATOR` - Display separator for hierarchical topics (default: ` > `)
+
+**Storage:**
+- `CHROMADB_DIR` - Vector database location (default: `cache/chromadb`)
+- `DOC_CACHE_DIR` - Document cache location (default: `cache/doc_cache`)
+- `DOCS_DIR` - Documents directory (default: `my-docs`, configurable via `DOCS_DIR` env var)
+- `CHROMA_COLLECTION_NAME` - Collection name (default: `my-documents`)
+
+**Startup Behavior:**
+- `FULL_SCAN_ON_BOOT` - Scan documents on server startup (env var, default: `False`)
+- `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Start folder watcher on startup (env var, default: `False`)
+
+**Server Transport:**
+- `MCP_HOST` - HTTP server host (env var, default: `0.0.0.0`)
+- `MCP_PORT` - HTTP server port (env var, default: `38777`)
 
 ## License
 
