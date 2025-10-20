@@ -51,8 +51,9 @@ WORKDIR /app
 # Copy manifests first for caching
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies only (cached)
-RUN uv sync --no-install-project
+# Install dependencies only (cached). --locked to ensure the dependencies in the lock file are used. 
+ENV UV_LINK_MODE=copy
+RUN --mount=type=cache,target="C:/Temp/uv-cache" uv sync --no-install-project
 
 # Copy app code (while not copying any file mentioned in the .dockerignore)
 COPY . .
@@ -61,10 +62,7 @@ COPY . .
 EXPOSE 38777
 
 # Entrypoint runs both stdio and HTTP transports
-ENTRYPOINT ["uv", "run", "python", "server.py"]
-
-
-
+ENTRYPOINT ["uv", "run", "python", "mcp_server.py"]
 
 
 
