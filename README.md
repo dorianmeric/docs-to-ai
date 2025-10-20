@@ -156,7 +156,7 @@ Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`
 
 ## 2. Installation, with Docker
 
-You need Docker Desktop, or Docker Engine, running. Then just write the following into a file called "docker-compose.yaml":
+You need Docker Desktop, or Docker Engine, running. Then just write the following into a file called "docker-compose.yaml" and it will pull and run the image from Docker Hub (Image: https://hub.docker.com/r/dmeric/docs-to-ai ):
 ````yaml
 services:
   docs-to-ai:
@@ -164,7 +164,7 @@ services:
     container_name: docs-to-ai
     
     volumes:
-      - ./cache/chromadb:/app/chromadb       # chromadb database (persists the vector store)
+      - ./cache/chromadb:/app/chromadb        # chromadb database (persists the vector store)
       - ./cache/doc_cache:/app/doc_cache      # Document cache (persists extracted text)
       - ./my-docs:/app/my-docs:ro             # Documents directory (your PDFs and Word docs). Read-only to prevent accidental modifications
     
@@ -173,7 +173,7 @@ services:
     tty: true
 
     ports:
-      - "${MCP_PORT:-38777}:38777"
+      - "${MCP_PORT:-38777}:38777"            # for http/sse transport, on http://0.0.0.0:38777/sse
 
     # Restart policy
     restart: unless-stopped
