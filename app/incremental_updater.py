@@ -4,9 +4,9 @@ Handles add, update, and delete operations on specific files.
 """
 from pathlib import Path
 from typing import List, Tuple
-from app.document_processor import DocumentProcessor
-from app.vector_store import VectorStore
-from app.config import TOPIC_SEPARATOR
+from .document_processor import DocumentProcessor
+from .vector_store import VectorStore
+from .config import TOPIC_SEPARATOR
 import time
 import sys
 

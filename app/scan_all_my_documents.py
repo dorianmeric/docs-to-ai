@@ -3,9 +3,9 @@ import argparse
 from pathlib import Path
 
 # Application-specific imports for document processing and vector storage
-from app.document_processor import DocumentProcessor
-from app.vector_store import VectorStore
-from app.config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
+from .document_processor import DocumentProcessor
+from .vector_store import VectorStore
+from .config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
 import sys
 
 def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):

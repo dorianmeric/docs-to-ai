@@ -154,7 +154,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
-from app.config import BASE_DIR, SUPPORTED_EXTENSIONS
+from .config import BASE_DIR, SUPPORTED_EXTENSIONS
 from typing import Callable, Optional, Set
 import os
 import sys

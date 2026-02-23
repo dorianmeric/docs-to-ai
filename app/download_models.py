@@ -1,6 +1,6 @@
 # app/download_models.py
 from sentence_transformers import SentenceTransformer, CrossEncoder
-from app.config import EMBEDDING_MODEL, USE_RERANKER, RERANKER_MODEL
+from .config import EMBEDDING_MODEL, USE_RERANKER, RERANKER_MODEL
 import sys
 
 def download_models():

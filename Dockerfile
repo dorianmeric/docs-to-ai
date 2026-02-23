@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.cache/uv  uv sync --no-install-project
 COPY . .
 
 # Pre-download and cache models to be included in the image
-RUN uv run python app/download_models.py
+RUN uv run python -m app.download_models
 
 # Expose HTTP port
 EXPOSE 38777

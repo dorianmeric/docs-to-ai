@@ -11,7 +11,7 @@ from docx import Document as DocxDocument
 import pandas as pd
 # from openpyxl import load_workbook
 # from io import BytesIO
-from app.config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, CHUNKING_STRATEGY
+from .config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, CHUNKING_STRATEGY
 
 
 class DocumentProcessor:
