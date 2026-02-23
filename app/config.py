@@ -19,7 +19,7 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # sentence-transformers model
 EMBEDDING_DIMENSION = 384  # Dimension for all-MiniLM-L6-v2
 
 # Chunking Configuration
-CHUNKING_STRATEGY = os.getenv('CHUNKING_STRATEGY', 'fixed_size').lower() # 'fixed_size' or 'by_paragraph'
+CHUNKING_STRATEGY = os.getenv('CHUNKING_STRATEGY', 'by_paragraph').lower() # 'fixed_size' or 'by_paragraph'
 CHUNK_SIZE = 1000  # Characters per chunk
 CHUNK_OVERLAP = 200  # Overlap between chunks
 
@@ -44,7 +44,7 @@ CHROMA_COLLECTION_NAME =  os.getenv('CHROMA_COLLECTION_NAME', "my-documents" )# 
 FULL_SCAN_ON_BOOT = os.getenv('FULL_SCAN_ON_BOOT', 'False').lower() in ('true', '1', 'yes', 'on')
 
 # Controls whether the folder watcher should be activated when the MCP server starts
-FOLDER_WATCHER_ACTIVE_ON_BOOT = os.getenv('FOLDER_WATCHER_ACTIVE_ON_BOOT', 'False').lower() in ('true', '1', 'yes', 'on')
+FOLDER_WATCHER_ACTIVE_ON_BOOT = os.getenv('FOLDER_WATCHER_ACTIVE_ON_BOOT', 'True').lower() in ('true', '1', 'yes', 'on')
 
 # MCP Server Transport Configuration
 # Controls the transport method for MCP server: 'stdio' for local connections, 'websocket' for network connections

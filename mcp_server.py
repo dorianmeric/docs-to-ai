@@ -10,6 +10,7 @@ import asyncio
 import time
 import sys
 import os
+from contextlib import asynccontextmanager
 from fastmcp import FastMCP
 from app.vector_store import VectorStore
 from app.config import (
@@ -23,17 +24,82 @@ from app.folder_watcher import (
     start_watching_folder as start_folder_watcher,
     stop_watching_folder as stop_folder_watcher,
     get_last_scan_time,
-    trigger_full_scan_if_needed
+    trigger_full_scan_if_needed,
+    is_watching
 )
 from app.incremental_updater import process_incremental_changes
 from app.scan_all_my_documents import scan_all
 
-# Initialize the FastMCP server with the name "docs-to-ai"
-# This creates an MCP server instance that can expose tools to Claude
-mcp = FastMCP("docs-to-ai")
-
 # Configuration
 DOCS_DIR = os.getenv("DOCS_DIR", "/app/my-docs")
+
+@asynccontextmanager
+async def lifespan(app):
+    """Handle startup and shutdown of the MCP server.
+    
+    Startup:
+        - Automatically starts folder watcher if FOLDER_WATCHER_ACTIVE_ON_BOOT is enabled
+        - Performs initial scan if FULL_SCAN_ON_BOOT is enabled
+    
+    Shutdown:
+        - Stops folder watcher if it's running
+    """
+    # ============================================================================
+    # STARTUP: Start folder watcher if configured
+    # ============================================================================
+    if FOLDER_WATCHER_ACTIVE_ON_BOOT:
+        print(f"[MCP Server] FOLDER_WATCHER_ACTIVE_ON_BOOT is enabled, starting folder watcher...", file=sys.stderr)
+        
+        def scan_callback(changes, incremental):
+            """Callback function for processing document changes.
+            
+            Args:
+                changes: List of (action, filepath) tuples for incremental updates
+                incremental: True for incremental update, False for full scan
+            
+            Returns:
+                list[TextContent]: Results from document processing
+            """
+            if incremental:
+                # Process only the changed files
+                return process_incremental_changes(changes, DOCS_DIR)
+            else:
+                # Do a full scan with database reset
+                return scan_all(DOCS_DIR)
+        
+        # Start the folder watcher with the callback
+        result = start_folder_watcher(scan_callback, do_initial_scan=FULL_SCAN_ON_BOOT)
+        
+        if result["status"] == "started":
+            print(f"[MCP Server] ✓ Folder watcher started automatically", file=sys.stderr)
+            print(f"[MCP Server]   Watching: {result['watch_path']}", file=sys.stderr)
+            print(f"[MCP Server]   Debounce: {result['debounce_seconds']}s", file=sys.stderr)
+            print(f"[MCP Server]   Full scan interval: {result['full_scan_interval_days']} days", file=sys.stderr)
+            if result.get('scan_result'):
+                print(f"[MCP Server]   Initial scan completed", file=sys.stderr)
+        else:
+            print(f"[MCP Server] ✗ Warning: Could not start folder watcher: {result.get('message')}", file=sys.stderr)
+    else:
+        print(f"[MCP Server] Folder watcher auto-start disabled (FOLDER_WATCHER_ACTIVE_ON_BOOT=False)", file=sys.stderr)
+        print(f"[MCP Server] Use the 'start_watching_folder' tool to start it manually", file=sys.stderr)
+    
+    # Yield control to the application
+    yield
+    
+    # ============================================================================
+    # SHUTDOWN: Stop folder watcher if running
+    # ============================================================================
+    if is_watching():
+        print("[MCP Server] Shutting down folder watcher...", file=sys.stderr)
+        result = stop_folder_watcher()
+        if result["status"] == "stopped":
+            print("[MCP Server] ✓ Folder watcher stopped", file=sys.stderr)
+        else:
+            print(f"[MCP Server] ✗ Warning: Error stopping folder watcher: {result.get('message')}", file=sys.stderr)
+
+# Initialize the FastMCP server with the name "docs-to-ai" and lifespan handler
+# This creates an MCP server instance that can expose tools to Claude
+mcp = FastMCP("docs-to-ai", lifespan=lifespan)
 
 def _format_file_size(size_in_bytes: int) -> str:
     """Helper to format file size."""
@@ -383,8 +449,9 @@ def start_watching_folder() -> str:
 
             return "\n".join(response_parts)
         elif result['status'] == 'already_watching':
-            # Watcher is already running (possibly started automatically on server boot)
-            return f"ℹ Folder watcher is already active (started automatically on server startup)\n\nWatching: {result['watch_path']}"
+            # Watcher is already running (started automatically if FOLDER_WATCHER_ACTIVE_ON_BOOT was enabled)
+            auto_start_msg = " (auto-started on boot)" if FOLDER_WATCHER_ACTIVE_ON_BOOT else ""
+            return f"ℹ Folder watcher is already active{auto_start_msg}\n\nWatching: {result['watch_path']}"
         else:
             # Failed to start the watcher
             return f"✗ Failed to start folder watcher\n\nError: {result.get('message', 'Unknown error')}"

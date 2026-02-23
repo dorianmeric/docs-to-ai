@@ -154,7 +154,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
-from .config import BASE_DIR, SUPPORTED_EXTENSIONS
+from .config import BASE_DIR, SUPPORTED_EXTENSIONS, FULL_SCAN_ON_BOOT
+from .vector_store import VectorStore
 from typing import Callable, Optional, Set
 import os
 import sys
@@ -781,8 +782,26 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
         # ====================================================================
         # Optional: Perform initial full scan
         # ====================================================================
-        # This ensures the database is populated on first startup
-        if do_initial_scan:
+        # Check if database is empty - if so, force a full scan regardless of settings
+        should_scan = do_initial_scan or FULL_SCAN_ON_BOOT
+        
+        # Override: Force scan if database is empty, even if FULL_SCAN_ON_BOOT is False
+        if not should_scan:
+            try:
+                vector_store = VectorStore()
+                doc_count = vector_store.collection.count()
+                if doc_count == 0:
+                    print(f"[FolderWatcher] Database is empty - forcing initial full scan", file=sys.stderr)
+                    should_scan = True
+                else:
+                    print(f"[FolderWatcher] Database has {doc_count} chunks - skipping initial scan", file=sys.stderr)
+            except Exception as e:
+                print(f"[FolderWatcher] Warning: Could not check database state: {e}", file=sys.stderr)
+                # If we can't check, follow the configured setting
+                pass
+        
+        # Perform the scan if needed
+        if should_scan:
             print(f"[FolderWatcher] Performing initial full scan...", file=sys.stderr)
             scan_result = _trigger_full_scan(scan_callback)
             # Include scan results in return value for MCP response
