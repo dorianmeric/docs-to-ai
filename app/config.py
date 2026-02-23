@@ -5,22 +5,11 @@ import os
 BASE_DIR = Path(__file__).parent.parent
 CHROMADB_DIR = BASE_DIR / "cache/chromadb"
 DOC_CACHE_DIR = BASE_DIR / "cache/doc_cache"
-
-# Default docs directory: /my-docs in Docker, BASE_DIR/my-docs otherwise
-_docs_dir_env = os.getenv('DOCS_DIR', '')
-if _docs_dir_env:
-    DOCS_DIR = Path(_docs_dir_env)
-elif os.path.exists('/my-docs'):
-    DOCS_DIR = Path('/my-docs')
-else:
-    DOCS_DIR = BASE_DIR / "my-docs"
-del _docs_dir_env
+DOCS_DIR = Path(os.getenv('DOCS_DIR', BASE_DIR / "my-docs")) # Default documents directory
 
 CHROMADB_DIR.mkdir(exist_ok=True, parents=True)
 DOC_CACHE_DIR.mkdir(exist_ok=True, parents=True)
-# Only create DOCS_DIR if it's not the Docker mount point
-if str(DOCS_DIR) != '/my-docs':
-    DOCS_DIR.mkdir(exist_ok=True, parents=True)
+DOCS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Document Processing Configuration
 SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.xlsx', '.xls', '.xlsam', '.xlsb', '.pptx', '.html', '.htm', '.txt', '.csv']  # Supported document types
