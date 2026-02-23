@@ -53,6 +53,10 @@ FULL_SCAN_ON_BOOT = os.getenv('FULL_SCAN_ON_BOOT', 'False').lower() in ('true', 
 # Controls whether the folder watcher should be activated when the MCP server starts
 FOLDER_WATCHER_ACTIVE_ON_BOOT = os.getenv('FOLDER_WATCHER_ACTIVE_ON_BOOT', 'True').lower() in ('true', '1', 'yes', 'on')
 
+# Folder Watcher Configuration
+DEBOUNCE_SECONDS = int(os.getenv('DEBOUNCE_SECONDS', '10'))  # Delay after last change before processing
+FULL_SCAN_INTERVAL_DAYS = int(os.getenv('FULL_SCAN_INTERVAL_DAYS', '7'))  # Days between full scans
+
 # MCP Server Transport Configuration
 # Controls the transport method for MCP server: 'stdio' for local connections, 'websocket' for network connections
 MCP_TRANSPORT = os.getenv('MCP_TRANSPORT', 'stdio').lower()

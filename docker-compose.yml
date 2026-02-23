@@ -18,7 +18,7 @@ services:
       - EMBEDDING_MODEL=all-MiniLM-L6-v2
       # Startup behavior control (defaults to True if not set)
       - FULL_SCAN_ON_BOOT=${FULL_SCAN_ON_BOOT:-False}
-      - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-False}
+      - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}
       # # MCP server transport configuration
       # - MCP_TRANSPORT=${MCP_TRANSPORT:-stdio}
       # - MCP_HOST=${MCP_HOST:-0.0.0.0}

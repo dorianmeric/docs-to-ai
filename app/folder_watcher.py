@@ -151,515 +151,69 @@ See also: mcp_server.py for production integration example
 import threading
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileSystemEvent
-from .config import BASE_DIR, SUPPORTED_EXTENSIONS, FULL_SCAN_ON_BOOT
-from .vector_store import VectorStore
-from typing import Callable, Optional, Set
-import os
+import time
 import sys
+import json
+import threading
+from datetime import datetime
+from typing import Callable, Dict, List, Optional, Set, Tuple
+from watchdog.observers import Observer
 
-# ============================================================================
-# Global State Variables
-# ============================================================================
-# These global variables maintain the state of the folder watcher across
-# function calls and allow coordination between the watcher thread and
-# the main application thread.
+from app.config import (
+    DOCS_DIR,
+    FULL_SCAN_INTERVAL_DAYS,
+    DEBOUNCE_SECONDS,
+    SUPPORTED_EXTENSIONS,
+    BASE_DIR
+)
 
-# The watchdog Observer instance that monitors file system events
+from .file_handler import IncrementalChangeHandler
+from .scan_scheduler import (
+    _check_full_scan_needed as _check_full_scan_needed_impl,
+    _trigger_full_scan as _trigger_full_scan_impl,
+    update_scan_time,
+    get_scan_timing_info,
+    _load_scan_state,
+    _save_scan_state
+)
+
+# ========================================================================
+# GLOBAL STATE
+# ========================================================================
+# _observer: The watchdog Observer instance that monitors file system events
 _observer = None
+_observer_lock = threading.Lock()
 
-# Boolean flag indicating whether the watcher is currently active
+# _watcher_active: Flag indicating if folder watching is currently active
 _watcher_active = False
 
-# Unix timestamp (float) of when the last scan started
-# Used to track scan duration and provide status information
-_last_scan_start_time = None
+# _watch_path: Current path being watched (stored as global for access by stop function)
+_watch_path: Optional[Path] = None
 
-# Unix timestamp (float) of when the last scan completed
-# Used to calculate scan duration
-_last_scan_end_time = None
+# _callback_function: User-provided callback for processing document changes
+_callback_function: Optional[Callable] = None
 
-# Unix timestamp (float) of when the last FULL scan was performed
-# Used to determine if a weekly full scan is due
-_last_full_scan_time = None
+# _last_scan_start_time: Time when last scan started
+_last_scan_start_time: Optional[float] = None
 
-# The callback function provided by the caller to process document changes
-# Signature: callback(changes: List[Tuple[str, str]], incremental: bool) -> list[TextContent]
-_callback_function = None
+# _last_scan_end_time: Time when last scan ended
+_last_scan_end_time: Optional[float] = None
 
-# Path object representing the directory being watched
-_watch_path = None
+# _last_full_scan_time: Time when last full scan was performed
+_last_full_scan_time: Optional[float] = None
 
-# ============================================================================
-# Configuration Constants
-# ============================================================================
-# Full scan interval - ensures the entire document set is re-processed weekly
-# This catches any documents that might have been missed by incremental updates
-FULL_SCAN_INTERVAL_DAYS = 7  # Do a full scan once a week
+# _scan_state_file: Path to JSON file for persisting scan state across restarts
+_scan_state_file = BASE_DIR / "cache/chromadb/scan_state.json"
 
-# Debounce period in seconds - prevents excessive processing during rapid file changes
-# When multiple files change in quick succession, changes are batched together
-# Reduced from 180 to 10 seconds to make incremental updates more responsive
-DEBOUNCE_SECONDS = 10
+# _pending_changes: Dictionary tracking pending file changes (action -> filepath)
+# This is used by IncrementalChangeHandler to batch changes
+# Not currently used in this version but kept for potential future use
+_pending_changes: Dict[str, Tuple[str, str]] = {}
+_pending_changes_lock = threading.Lock()
 
-
-class IncrementalChangeHandler(FileSystemEventHandler):
-    """
-    Event handler that tracks individual file changes and triggers incremental updates.
-
-    This class extends watchdog's FileSystemEventHandler to monitor file system events
-    (create, modify, delete, move) and batch them for efficient processing. It uses
-    a debouncing mechanism to avoid triggering updates too frequently when many files
-    change in rapid succession.
-
-    Design Pattern:
-    - Debouncing: File changes are collected and processed after a quiet period
-    - Thread-safe: Uses locks to coordinate between the file watcher thread and timer thread
-    - Smart deduplication: Conflicting actions (e.g., add then delete) are resolved intelligently
-
-    Example:
-        If 10 files are modified within 5 seconds, instead of triggering 10 separate
-        updates, they are batched into a single update that processes all 10 files together.
-    """
-
-    def __init__(self, callback: Callable, watch_path: Path, debounce_seconds: int = DEBOUNCE_SECONDS):
-        """
-        Initialize the incremental change handler.
-
-        Args:
-            callback: Function to call when processing batched changes
-                     Signature: callback(changes: List[Tuple[str, str]], incremental: bool)
-            watch_path: Path object for the directory being monitored
-            debounce_seconds: Seconds to wait after last change before triggering callback
-        """
-        super().__init__()
-        self.callback = callback
-        self.watch_path = watch_path
-        self.debounce_seconds = debounce_seconds
-
-        # Set of pending changes: {(action, filepath), ...}
-        # Actions: 'add', 'update', 'delete'
-        # Using a set ensures no duplicate entries for the same (action, filepath) pair
-        self.pending_changes: Set[tuple] = set()
-
-        # Timestamp of the last time the callback was triggered (currently unused)
-        self.last_triggered = 0
-
-        # Timer object for implementing the debounce delay
-        # Cancelled and recreated each time a new file change is detected
-        self.timer = None
-
-        # Thread lock to ensure thread-safe access to pending_changes and timer
-        # Necessary because file events and timer callbacks run on different threads
-        self.lock = threading.Lock()
-        
-    def _is_supported_file(self, path: str) -> bool:
-        """
-        Check if file has a supported extension.
-
-        This filters out files that aren't document types we want to process.
-        Supported extensions are defined in app.config.SUPPORTED_EXTENSIONS.
-
-        Args:
-            path: Full file path to check
-
-        Returns:
-            bool: True if file extension is supported, False otherwise
-
-        Examples:
-            _is_supported_file("/docs/report.pdf") -> True (if .pdf is supported)
-            _is_supported_file("/docs/image.jpg") -> False (if .jpg not supported)
-        """
-        return any(path.lower().endswith(ext) for ext in SUPPORTED_EXTENSIONS)
-
-    def _should_ignore(self, path: str) -> bool:
-        """
-        Check if file should be ignored based on filename patterns.
-
-        This filters out temporary files, backup files, and system files that
-        shouldn't trigger document processing. Common patterns include:
-        - Editor temporary files (.tmp, .swp, ~$)
-        - System metadata files (.DS_Store, Thumbs.db)
-        - Partial downloads (.crdownload, .part)
-
-        Args:
-            path: Full file path to check
-
-        Returns:
-            bool: True if file should be ignored, False if it should be processed
-
-        Note:
-            This uses substring matching, not regex, for simplicity and speed.
-            For example, "~$report.docx" will be ignored because it contains "~$".
-        """
-        filename = os.path.basename(path)
-        # Ignore temporary files and system files
-        ignore_patterns = ['.tmp', '~$', '.swp', '.DS_Store', 'Thumbs.db', '.crdownload', '.part']
-        return any(pattern in filename for pattern in ignore_patterns)
-    
-    def _schedule_update(self):
-        """
-        Schedule an update after debounce period.
-
-        This implements the debouncing mechanism. Every time a file change is detected,
-        this method is called. If a timer is already running, it's cancelled and a new
-        one is started. This means the callback will only execute after there have been
-        no file changes for `debounce_seconds`.
-
-        Thread Safety:
-            Uses self.lock to prevent race conditions between:
-            - Multiple file events happening simultaneously
-            - File events and timer expiration
-
-        Debouncing Example:
-            Time 0s: File A modified -> timer starts (10s countdown)
-            Time 2s: File B modified -> timer cancelled, new timer starts (10s countdown)
-            Time 5s: File C modified -> timer cancelled, new timer starts (10s countdown)
-            Time 15s: No more changes -> timer expires, _execute_update called with all 3 files
-        """
-        with self.lock:
-            # Cancel existing timer if one is running
-            # This effectively "resets" the debounce countdown
-            if self.timer:
-                self.timer.cancel()
-
-            # Schedule new update to execute after debounce_seconds
-            self.timer = threading.Timer(self.debounce_seconds, self._execute_update)
-            # Mark as daemon so it won't prevent program exit
-            self.timer.daemon = True
-            self.timer.start()
-    
-    def _execute_update(self):
-        """
-        Execute the incremental update for all pending changes.
-
-        This method is called by the timer after the debounce period expires.
-        It processes all accumulated file changes as a batch, improving efficiency
-        compared to processing each change individually.
-
-        Process Flow:
-            1. Atomically extract and clear pending changes (thread-safe)
-            2. Group changes by action type for logging
-            3. Call the user-provided callback with all changes
-            4. Update global scan timing variables
-
-        Global Side Effects:
-            - Updates _last_scan_start_time
-            - Updates _last_scan_end_time
-
-        Thread Safety:
-            Uses self.lock only briefly to copy/clear pending_changes, then
-            releases it before the potentially long-running callback execution.
-            This allows new file events to be queued while processing is ongoing.
-
-        Error Handling:
-            Exceptions are caught and logged but don't crash the watcher.
-            This ensures the folder watcher remains active even if document
-            processing fails.
-        """
-        global _last_scan_start_time, _last_scan_end_time
-
-        # Atomically extract pending changes and reset state
-        with self.lock:
-            if not self.pending_changes:
-                return
-
-            # Copy the changes and clear the set
-            # This allows new changes to accumulate while we process these
-            changes_to_process = list(self.pending_changes)
-            self.pending_changes.clear()
-            self.timer = None
-
-        try:
-            _last_scan_start_time = time.time()
-            # Note: These print statements are for server-side logging only
-            # The actual results are returned via the callback's JSON-RPC response
-            print(f"\n[FolderWatcher] Starting incremental update at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}", file=sys.stderr)
-            print(f"[FolderWatcher] Processing {len(changes_to_process)} file change(s)", file=sys.stderr)
-
-            # Group changes by action type for diagnostic logging
-            changes_by_action = {}
-            for action, filepath in changes_to_process:
-                if action not in changes_by_action:
-                    changes_by_action[action] = []
-                changes_by_action[action].append(filepath)
-
-            # Log summary of what we're processing
-            for action, files in changes_by_action.items():
-                print(f"[FolderWatcher]   {action}: {len(files)} file(s)", file=sys.stderr)
-
-            # Execute callback with changes - callback returns JSON-RPC response
-            if self.callback:
-                result = self.callback(changes_to_process, incremental=True)
-                # Result is now a list[TextContent] that will be sent via MCP
-                print(f"[FolderWatcher] Update callback completed, result returned via MCP", file=sys.stderr)
-
-            _last_scan_end_time = time.time()
-            duration = _last_scan_end_time - _last_scan_start_time
-            print(f"[FolderWatcher] Incremental update completed in {duration:.2f}s", file=sys.stderr)
-
-        except Exception as e:
-            _last_scan_end_time = time.time()
-            print(f"[FolderWatcher] Error during incremental update: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-    
-    def on_created(self, event: FileSystemEvent):
-        """
-        Handle file creation events.
-
-        Called by watchdog when a new file is created in the watched directory.
-
-        Smart Deduplication:
-            If a file was previously marked for deletion (e.g., during a move operation),
-            that delete action is removed before adding the 'add' action. This prevents
-            unnecessary delete+add operations for renamed files.
-
-        Args:
-            event: FileSystemEvent object containing the file path
-
-        Actions Taken:
-            - Ignores directories (only files are processed)
-            - Filters out temporary/system files and unsupported extensions
-            - Adds ('add', filepath) to pending_changes
-            - Schedules debounced update
-        """
-        if event.is_directory:
-            return
-
-        src_path = str(event.src_path)
-        if self._should_ignore(src_path) or not self._is_supported_file(src_path):
-            return
-
-        with self.lock:
-            # Remove any previous delete actions for this file
-            # This handles the case where a file is moved/renamed within the watched directory
-            self.pending_changes.discard(('delete', src_path))
-            self.pending_changes.add(('add', src_path))
-
-        print(f"[FolderWatcher] File created: {src_path}", file=sys.stderr)
-        self._schedule_update()
-    
-    def on_modified(self, event: FileSystemEvent):
-        """
-        Handle file modification events.
-
-        Called by watchdog when an existing file is modified (content changed).
-
-        Note on Duplicate Events:
-            File systems may generate multiple modification events for a single
-            save operation. The debouncing mechanism handles this by batching
-            all modifications within the debounce period.
-
-        Args:
-            event: FileSystemEvent object containing the file path
-
-        Actions Taken:
-            - Ignores directories (only files are processed)
-            - Filters out temporary/system files and unsupported extensions
-            - Adds ('update', filepath) to pending_changes
-            - Schedules debounced update
-        """
-        if event.is_directory:
-            return
-
-        src_path = str(event.src_path)
-        if self._should_ignore(src_path) or not self._is_supported_file(src_path):
-            return
-
-        with self.lock:
-            # Treat modification as update
-            # If the same file is modified multiple times, the set will deduplicate
-            self.pending_changes.add(('update', src_path))
-
-        print(f"[FolderWatcher] File modified: {src_path}", file=sys.stderr)
-        self._schedule_update()
-    
-    def on_deleted(self, event: FileSystemEvent):
-        """
-        Handle file deletion events.
-
-        Called by watchdog when a file is deleted from the watched directory.
-
-        Smart Deduplication:
-            If a file was previously marked for 'add' or 'update', those actions
-            are removed. This handles scenarios like:
-            - File created then immediately deleted -> no action needed
-            - File modified then deleted -> only delete action needed
-
-        Args:
-            event: FileSystemEvent object containing the file path
-
-        Actions Taken:
-            - Ignores directories (only files are processed)
-            - Filters out temporary/system files and unsupported extensions
-            - Removes any pending 'add' or 'update' actions for this file
-            - Adds ('delete', filepath) to pending_changes
-            - Schedules debounced update
-        """
-        if event.is_directory:
-            return
-
-        src_path = str(event.src_path)
-        if self._should_ignore(src_path) or not self._is_supported_file(src_path):
-            return
-
-        with self.lock:
-            # Remove any pending add/update actions for this file
-            # This ensures we don't try to add/update a file that no longer exists
-            self.pending_changes.discard(('add', src_path))
-            self.pending_changes.discard(('update', src_path))
-            self.pending_changes.add(('delete', src_path))
-
-        print(f"[FolderWatcher] File deleted: {src_path}", file=sys.stderr)
-        self._schedule_update()
-    
-    def on_moved(self, event: FileSystemEvent):
-        """
-        Handle file move/rename events.
-
-        Called by watchdog when a file is moved or renamed. This is treated as
-        a combination of delete (old path) and add (new path).
-
-        Complex Scenarios Handled:
-            1. Move within watched directory: Delete old path, add new path
-            2. Move from watched to unwatched directory: Delete only
-            3. Move from unwatched to watched directory: Add only
-            4. Rename (special case of move): Delete old name, add new name
-
-        File Extension Changes:
-            If a file is renamed from .pdf to .txt (for example), and only .pdf
-            is supported, this will correctly delete the old file and ignore the
-            new unsupported extension.
-
-        Args:
-            event: FileSystemEvent object containing src_path and dest_path
-
-        Actions Taken:
-            - Ignores directories (only files are processed)
-            - Processes source path: Removes pending actions, adds delete
-            - Processes dest path: Removes delete action, adds add
-            - Schedules debounced update
-        """
-        if event.is_directory:
-            return
-
-        src_path = str(event.src_path)
-        dest_path = str(event.dest_path)
-
-        # Handle source file (old location)
-        if self._is_supported_file(src_path) and not self._should_ignore(src_path):
-            with self.lock:
-                # Remove any pending actions for old path
-                self.pending_changes.discard(('add', src_path))
-                self.pending_changes.discard(('update', src_path))
-                # Mark old path for deletion
-                self.pending_changes.add(('delete', src_path))
-            print(f"[FolderWatcher] File moved from: {src_path}", file=sys.stderr)
-
-        # Handle destination file (new location)
-        if self._is_supported_file(dest_path) and not self._should_ignore(dest_path):
-            with self.lock:
-                # Remove any delete action for destination (in case of overwrite)
-                self.pending_changes.discard(('delete', dest_path))
-                # Mark new path for addition
-                self.pending_changes.add(('add', dest_path))
-            print(f"[FolderWatcher] File moved to: {dest_path}", file=sys.stderr)
-
-        self._schedule_update()
-
-
-def _check_full_scan_needed() -> bool:
-    """
-    Check if a full scan is needed based on time since last full scan.
-
-    Full scans are performed periodically (default: every 7 days) to ensure
-    data consistency. This catches any documents that might have been missed
-    by incremental updates due to edge cases or system issues.
-
-    Returns:
-        bool: True if full scan is needed, False otherwise
-
-    Logic:
-        - Returns True if no full scan has ever been performed
-        - Returns True if FULL_SCAN_INTERVAL_DAYS or more have passed
-        - Returns False otherwise
-    """
-    global _last_full_scan_time
-
-    # If we've never done a full scan, we need one
-    if _last_full_scan_time is None:
-        return True
-
-    # Calculate days since last full scan
-    time_since_last_scan = datetime.now() - datetime.fromtimestamp(_last_full_scan_time)
-    return time_since_last_scan.days >= FULL_SCAN_INTERVAL_DAYS
-
-
-def _trigger_full_scan(callback: Callable):
-    """
-    Trigger a full scan of all documents with database reset.
-
-    Unlike incremental updates, a full scan:
-    - Resets the database (clears existing document embeddings)
-    - Re-processes ALL documents in the watched directory
-    - Updates _last_full_scan_time to track the weekly schedule
-
-    This is used for:
-    - Initial setup (first-time scan)
-    - Weekly maintenance scans
-    - Manual forced scans (when user suspects data issues)
-
-    Args:
-        callback: Callback function that processes documents
-                 Signature: callback(changes: List, incremental: bool) -> list[TextContent]
-                 For full scans, changes is an empty list and incremental=False
-
-    Returns:
-        list[TextContent]: Result from callback containing scan summary
-        None: If an error occurred during scanning
-
-    Global Side Effects:
-        - Updates _last_scan_start_time
-        - Updates _last_scan_end_time
-        - Updates _last_full_scan_time (used for weekly scheduling)
-
-    Error Handling:
-        Exceptions are caught, logged, and None is returned. This prevents
-        the watcher from crashing due to document processing errors.
-    """
-    global _last_scan_start_time, _last_scan_end_time, _last_full_scan_time
-
-    try:
-        _last_scan_start_time = time.time()
-        _last_full_scan_time = _last_scan_start_time
-
-        # Note: These print statements are for server-side logging only
-        # The actual results are returned via the callback's JSON-RPC response
-        print(f"\n[FolderWatcher] Starting FULL SCAN (with database reset) at {datetime.fromtimestamp(_last_scan_start_time).isoformat()}", file=sys.stderr)
-
-        # Execute callback with full scan flag - callback returns JSON-RPC response
-        result = None
-        if callback:
-            # Empty changes list + incremental=False signals a full scan
-            result = callback([], incremental=False)
-            # Result is now a list[TextContent] that will be sent via MCP
-            print(f"[FolderWatcher] Full scan callback completed, result returned via MCP", file=sys.stderr)
-
-        _last_scan_end_time = time.time()
-        duration = _last_scan_end_time - _last_scan_start_time
-        print(f"[FolderWatcher] Full scan completed in {duration:.2f}s", file=sys.stderr)
-
-        return result
-
-    except Exception as e:
-        _last_scan_end_time = time.time()
-        print(f"[FolderWatcher] Error during full scan: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return None
+# _debounce_timer: Timer for debouncing file changes
+_debounce_timer: Optional[threading.Timer] = None
+_debounce_timer_lock = threading.Lock()
 
 
 def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = None,
@@ -803,7 +357,7 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
         # Perform the scan if needed
         if should_scan:
             print(f"[FolderWatcher] Performing initial full scan...", file=sys.stderr)
-            scan_result = _trigger_full_scan(scan_callback)
+            scan_result = _trigger_full_scan_impl(scan_callback)
             # Include scan results in return value for MCP response
             if scan_result:
                 result['scan_result'] = scan_result
@@ -976,7 +530,7 @@ def get_last_scan_time():
             "last_full_scan_time": full_scan_dt.isoformat(),
             "last_full_scan_time_formatted": full_scan_dt.strftime("%Y-%m-%d %H:%M:%S"),
             "days_since_full_scan": (datetime.now() - full_scan_dt).days,
-            "next_full_scan_due": _check_full_scan_needed()
+            "next_full_scan_due": _check_full_scan_needed_impl()
         })
 
     return result
@@ -1016,13 +570,13 @@ def trigger_full_scan_if_needed():
         }
 
     # Check if it's time for a full scan
-    if _check_full_scan_needed():
+    if _check_full_scan_needed_impl():
         if _callback_function is None:
             return {
                 "status": "error",
                 "message": "No callback function is set"
             }
-        _trigger_full_scan(_callback_function)
+        _trigger_full_scan_impl(_callback_function)
         return {
             "status": "full_scan_triggered",
             "message": "Full scan was needed and has been triggered"
@@ -1085,7 +639,7 @@ def force_full_scan():
         }
 
     # Trigger full scan regardless of schedule
-    _trigger_full_scan(_callback_function)
+    _trigger_full_scan_impl(_callback_function)
     return {
         "status": "full_scan_triggered",
         "message": "Full scan has been triggered"

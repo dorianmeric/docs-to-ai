@@ -212,7 +212,7 @@ The `docker-compose.yml` configures:
 
 **Environment Variables:**
 - `FULL_SCAN_ON_BOOT` - Set to `True` to scan documents on startup (default: `False`)
-- `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Set to `True` to start folder watcher on startup (default: `False`)
+- `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Set to `True` to start folder watcher on startup (default: `True`)
 - `MCP_PORT` - Customize HTTP port (default: `38777`)
 
 Example with custom environment variables:

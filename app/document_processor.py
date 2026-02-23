@@ -1,17 +1,25 @@
-import pymupdf  # PyMuPDF -- Library for PDF processing
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 import hashlib
 import json
 import sys
 import re
-from docx import Document as DocxDocument
-import pandas as pd
-from bs4 import BeautifulSoup
+
 from .config import (
     CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, 
     CHUNKING_STRATEGY, CHUNK_BY_TOKEN, TOKENIZER_MODEL, PRESERVE_HEADINGS, 
     MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE
+)
+
+from .extractors import (
+    extract_text_from_pdf,
+    extract_text_from_docx,
+    extract_text_from_markdown,
+    extract_text_from_excel,
+    extract_text_from_pptx,
+    extract_text_from_html,
+    extract_text_from_txt,
+    extract_text_from_csv,
 )
 
 try:
@@ -67,339 +75,6 @@ class DocumentProcessor:
         
         return topics if topics else [DEFAULT_TOPIC]
     
-    def extract_text_from_pdf(self, pdf_path: Path) -> List[Dict[str, Any]]:
-        """
-        Extract text from PDF, maintaining page information.
-        
-        Args:
-            pdf_path: Path to the PDF file
-            
-        Returns:
-            List of dicts with 'page' and 'text'
-        """
-        pages_data = []
-        
-        try:
-            doc = pymupdf.open(pdf_path)
-            
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                text = page.get_text()
-                
-                pages_data.append({
-                    'page': page_num + 1,
-                    'text': text,
-                    'total_pages': len(doc)
-                })
-            
-            doc.close()
-            
-        except Exception as e:
-            print(f"Error processing PDF {pdf_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-    
-    def extract_text_from_docx(self, docx_path: Path) -> List[Dict[str, Any]]:
-        """
-        Extract text from Word document.
-        
-        Args:
-            docx_path: Path to the DOCX file
-            
-        Returns:
-            List of dicts with 'page' (paragraph number) and 'text'
-        """
-        pages_data = []
-
-        try:
-            doc = DocxDocument(str(docx_path))
-            
-            # Combine paragraphs into chunks (simulating pages)
-            # Group every ~10 paragraphs as a "page"
-            paragraphs_per_page = 10
-            current_text = []
-            page_num = 1
-            
-            for i, paragraph in enumerate(doc.paragraphs):
-                text = paragraph.text.strip()
-                if text:
-                    current_text.append(text)
-                
-                # Create a "page" every N paragraphs or at the end
-                if (i + 1) % paragraphs_per_page == 0 or i == len(doc.paragraphs) - 1:
-                    if current_text:
-                        pages_data.append({
-                            'page': page_num,
-                            'text': '\n'.join(current_text),
-                            'total_pages': -1  # Unknown for Word docs
-                        })
-                        page_num += 1
-                        current_text = []
-            
-        except Exception as e:
-            print(f"Error processing Word document {docx_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-    
-    def extract_text_from_markdown(self, md_path: Path) -> List[Dict[str, Any]]:
-        """
-        Extract text from markdown file.
-        
-        Args:
-            md_path: Path to the markdown file
-            
-        Returns:
-            List of dicts with 'page' and 'text'
-        """
-        pages_data = []
-        
-        try:
-            # Read the markdown file
-            with open(md_path, 'r', encoding='utf-8') as f:
-                markdown_content = f.read()
-            
-            # Convert markdown to plain text (removing markdown syntax)
-            # We'll use a simple approach that preserves structure
-            # For markdown files, we treat the whole file as one "page"
-            # but can be split into chunks if needed
-            
-            # Simple conversion: remove markdown formatting
-            # Remove code blocks and inline code
-            
-            # Remove code blocks
-            text = re.sub(r'```[^`]*```', '', markdown_content, flags=re.DOTALL)
-            # Remove inline code
-            text = re.sub(r'`[^`]*`', '', text)
-            # Remove markdown headers (## Header, ### Header, etc.)
-            text = re.sub(r'^#+\s+(.*)$', r'\1', text, flags=re.MULTILINE)
-            # Remove markdown lists and bullets
-            text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
-            # Remove markdown links
-            text = re.sub(r'\[([^\\]]+)\]\([^)]+\)', r'\1', text)
-            # Remove markdown images
-            text = re.sub(r'!\[([^\\]]*)\]\([^)]+\)', r'\1', text)
-            # Replace multiple newlines with single newline
-            text = re.sub(r'\n\s*\n', '\n\n', text)
-            
-            pages_data.append({
-                'page': 1,
-                'text': text.strip(),
-                'total_pages': 1
-            })
-            
-        except Exception as e:
-            print(f"Error processing markdown file {md_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-    
-    def extract_text_from_excel(self, excel_path: Path) -> List[Dict[str, Any]]:
-        """
-        Extract text from Excel file.
-        
-        Args:
-            excel_path: Path to the Excel file
-            
-        Returns:
-            List of dicts with 'page' and 'text'
-        """
-        pages_data = []
-        
-        try:
-            # Read all sheets in the Excel file
-            sheet_names = pd.read_excel(excel_path, sheet_name=None)
-            
-            # Process each sheet
-            for sheet_name, df in sheet_names.items():
-                # Convert dataframe to text representation
-                sheet_text = f"\n--- Sheet: {sheet_name} ---\n"
-                
-                # Add column headers
-                if not df.empty:
-                    # Get column names
-                    columns = list(df.columns)
-                    sheet_text += "Columns: " + ", ".join(str(col) for col in columns) + "\n\n"
-                    
-                    # Add data rows
-                    for row_num, (_, row) in enumerate(df.iterrows(), start=1):
-                        row_text = "\t".join(str(val) for val in row.values)
-                        sheet_text += f"Row {row_num}: {row_text}\n"
-                else:
-                    sheet_text += "(Empty sheet)\n"
-                
-                pages_data.append({
-                    'page': len(pages_data) + 1,
-                    'text': sheet_text.strip(),
-                    'total_pages': len(sheet_names)
-                })
-            
-        except Exception as e:
-            print(f"Error processing Excel file {excel_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-
-    def extract_text_from_pptx(self, pptx_path: Path) -> List[Dict[str, Any]]:
-        """Extract text from PowerPoint presentation."""
-        pages_data = []
-        
-        try:
-            from pptx import Presentation
-            
-            prs = Presentation(str(pptx_path))
-            
-            for slide_num, slide in enumerate(prs.slides, start=1):
-                slide_text = []
-                
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        text = shape.text.strip()
-                        if text:
-                            slide_text.append(text)
-                
-                if slide_text:
-                    pages_data.append({
-                        'page': slide_num,
-                        'text': '\n'.join(slide_text),
-                        'total_pages': len(prs.slides)
-                    })
-                else:
-                    pages_data.append({
-                        'page': slide_num,
-                        'text': '',
-                        'total_pages': len(prs.slides)
-                    })
-                    
-        except Exception as e:
-            print(f"Error processing PowerPoint {pptx_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-
-    def extract_text_from_html(self, html_path: Path) -> List[Dict[str, Any]]:
-        """Extract text from HTML file."""
-        pages_data = []
-        
-        try:
-            with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
-                html_content = f.read()
-            
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            for script in soup(["script", "style"]):
-                script.decompose()
-            
-            text = soup.get_text(separator='\n')
-            
-            lines = (line.strip() for line in text.splitlines())
-            chunks = []
-            current_chunk = []
-            
-            for line in lines:
-                if line:
-                    current_chunk.append(line)
-                    if len('\n'.join(current_chunk)) > 2000:
-                        chunks.append('\n'.join(current_chunk))
-                        current_chunk = []
-            
-            if current_chunk:
-                chunks.append('\n'.join(current_chunk))
-            
-            for i, chunk in enumerate(chunks, start=1):
-                pages_data.append({
-                    'page': i,
-                    'text': chunk,
-                    'total_pages': len(chunks)
-                })
-            
-            if not pages_data:
-                pages_data.append({
-                    'page': 1,
-                    'text': '',
-                    'total_pages': 1
-                })
-                
-        except Exception as e:
-            print(f"Error processing HTML file {html_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-
-    def extract_text_from_txt(self, txt_path: Path) -> List[Dict[str, Any]]:
-        """Extract text from plain text file."""
-        pages_data = []
-        
-        try:
-            with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            lines = content.splitlines()
-            chunks = []
-            current_chunk = []
-            
-            for line in lines:
-                current_chunk.append(line)
-                if len('\n'.join(current_chunk)) > 2000:
-                    chunks.append('\n'.join(current_chunk))
-                    current_chunk = []
-            
-            if current_chunk:
-                chunks.append('\n'.join(current_chunk))
-            
-            for i, chunk in enumerate(chunks, start=1):
-                pages_data.append({
-                    'page': i,
-                    'text': chunk,
-                    'total_pages': len(chunks)
-                })
-            
-            if not pages_data:
-                pages_data.append({
-                    'page': 1,
-                    'text': '',
-                    'total_pages': 1
-                })
-                
-        except Exception as e:
-            print(f"Error processing text file {txt_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-
-    def extract_text_from_csv(self, csv_path: Path) -> List[Dict[str, Any]]:
-        """Extract text from CSV file with proper table handling."""
-        pages_data = []
-        
-        try:
-            df = pd.read_csv(csv_path)
-            
-            if not df.empty:
-                csv_text = f"Columns: {', '.join(str(col) for col in df.columns)}\n\n"
-                
-                for idx, row in df.iterrows():
-                    row_text = " | ".join(f"{col}: {row[col]}" for col in df.columns)
-                    csv_text += f"Row {idx + 1}: {row_text}\n"
-                
-                pages_data.append({
-                    'page': 1,
-                    'text': csv_text.strip(),
-                    'total_pages': 1
-                })
-            else:
-                pages_data.append({
-                    'page': 1,
-                    'text': '(Empty CSV file)',
-                    'total_pages': 1
-                })
-                
-        except Exception as e:
-            print(f"Error processing CSV file {csv_path}: {e}", file=sys.stderr)
-            return []
-        
-        return pages_data
-    
     def extract_text_from_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Extract text from document (PDF, Word, Markdown, or Excel), maintaining structure.
@@ -436,21 +111,21 @@ class DocumentProcessor:
         extension = doc_file.suffix.lower()
 
         if extension == '.pdf':
-            pages_data = self.extract_text_from_pdf(doc_file)
+            pages_data = extract_text_from_pdf(doc_file)
         elif extension in ['.docx', '.doc']:
-            pages_data = self.extract_text_from_docx(doc_file)
+            pages_data = extract_text_from_docx(doc_file)
         elif extension == '.md':
-            pages_data = self.extract_text_from_markdown(doc_file)
+            pages_data = extract_text_from_markdown(doc_file)
         elif extension in ['.xlsx', '.xls', '.xlsam', '.xlsb']:
-            pages_data = self.extract_text_from_excel(doc_file)
+            pages_data = extract_text_from_excel(doc_file)
         elif extension == '.pptx':
-            pages_data = self.extract_text_from_pptx(doc_file)
+            pages_data = extract_text_from_pptx(doc_file)
         elif extension in ['.html', '.htm']:
-            pages_data = self.extract_text_from_html(doc_file)
+            pages_data = extract_text_from_html(doc_file)
         elif extension == '.txt':
-            pages_data = self.extract_text_from_txt(doc_file)
+            pages_data = extract_text_from_txt(doc_file)
         elif extension == '.csv':
-            pages_data = self.extract_text_from_csv(doc_file)
+            pages_data = extract_text_from_csv(doc_file)
         else:
             print(f"Unsupported file type: {extension}", file=sys.stderr)
             return []
