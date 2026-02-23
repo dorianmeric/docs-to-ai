@@ -20,6 +20,9 @@ RUN --mount=type=cache,target=/root/.cache/uv  uv sync --no-install-project
 # Copy app code (while not copying any file mentioned in the .dockerignore)
 COPY . .
 
+# Pre-download and cache models to be included in the image
+RUN uv run python app/download_models.py
+
 # Expose HTTP port
 EXPOSE 38777
 
