@@ -1,27 +1,31 @@
-# Docs-to-AI -- PDF/Word Document Query System with MCP
+# Docs-to-AI -- Document Query System with MCP
 
-A Model Context Protocol (MCP) server that enables LLMs (like Claude Desktop or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
-Supports: PDF, Word, Excel, Markdown.
-Supported extensions: .pdf, .docx, .doc, .xlsx, .xls, .xlsam, .xlsb, .md
+A A production-ready RAG that runs as a Model Context Protocol (MCP) server, which enables LLMs (like Claude Desktop or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
+Supports: PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, CSV.
+Supported extensions: .pdf, .docx, .doc, .xlsx, .xls, .xlsam, .xlsb, .md, .pptx, .html, .htm, .txt, .csv
 
 The model used for document retrieval is all-MiniLM-L6-v2, with 384 dimensions for the embeddings.
 
 ## Features
 
-- Extract text from PDF documents
+- Extract text from PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, and CSV documents
 - Organize documents by topics (using folder structure)
 - Generate embeddings for semantic search
 - Store documents in a vector database (chromadb)
 - Expose MCP tools for Claude to search and retrieve documents
 - Filter searches by topic/category
 - Handle multiple documents with the same filename across different topics
+- **Advanced Search**: Phrase matching, date-range filtering, regex pattern matching
+- **Smart Chunking**: Fixed-size, by-paragraph, semantic heading-based, or token-based chunking
+- Preserve heading/section structure for smarter retrieval
+- Optional re-ranker model for improved search quality
 
 ## Architecture
 
 ```
-PDFs (organized by topic folders)
+Documents (PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, CSV)
   → Text Extraction
-    → Chunking
+    → Chunking (fixed/paragraph/heading/token)
       → Embeddings
         → chromadb (with topic tags)
           ↓
@@ -265,7 +269,11 @@ You should now be able to ask your LLM questions about the documents.
 The server exposes the following tools for LLMs:
 
 **Search & Discovery:**
-- `search_documents` - Semantic search across all documents (with optional topic filter)
+- `search_documents` - Semantic search across all documents with optional filters:
+  - `topic` - Filter by topic/category
+  - `phrase_search` - Exact phrase matching
+  - `date_from` / `date_to` - Filter by last_modified timestamp (Unix)
+  - `regex_pattern` - Filter by regex pattern in text
 - `list_documents` - List all available documents (with optional topic filter)
 - `list_topics` - List all topics/categories
 - `get_collection_stats` - Get statistics about the collection (file types, sizes, counts)
@@ -296,6 +304,11 @@ Once configured, you can ask Claude:
 - "Find all mentions of pandas across all documents"
 - "What are the key concepts in the Machine_Learning documents?"
 
+**Advanced search (with filters):**
+- "Search for 'neural networks' as exact phrase" - Phrase search
+- "Find documents about Python modified after 2024-01-01" - Date filtering
+- "Search for items matching pattern \d{3}-\d{4}" - Regex pattern search
+
 **Document management:**
 - "Scan all my documents" - Triggers a full re-index
 - "Start watching my documents folder for changes" - Enables automatic updates
@@ -307,13 +320,22 @@ Once configured, you can ask Claude:
 Edit [app/config.py](app/config.py) to customize:
 
 **Document Processing:**
-- `SUPPORTED_EXTENSIONS` - File types to process (default: `.pdf`, `.docx`, `.doc`, `.md`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb`)
-- `CHUNK_SIZE` - Characters per chunk (default: `1000`)
+- `SUPPORTED_EXTENSIONS` - File types to process (default: `.pdf`, `.docx`, `.doc`, `.md`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb`, `.pptx`, `.html`, `.htm`, `.txt`, `.csv`)
+- `CHUNKING_STRATEGY` - Chunking strategy: `fixed_size`, `by_paragraph`, `semantic_heading`, or `by_token` (default: `by_paragraph`)
+- `CHUNK_SIZE` - Characters per chunk (or tokens if `CHUNK_BY_TOKEN=true`) (default: `1000`)
 - `CHUNK_OVERLAP` - Overlap between chunks (default: `200`)
+- `CHUNK_BY_TOKEN` - Use token-based chunking instead of character-based (env var, default: `False`)
+- `TOKENIZER_MODEL` - TikToken tokenizer for token chunking (default: `cl100k_base`)
+- `PRESERVE_HEADINGS` - Preserve heading structure in chunks (env var, default: `True`)
+- `MAX_HEADING_CHUNK_SIZE` - Max chars per heading-based chunk (default: `2000`)
 
 **Search Configuration:**
 - `DEFAULT_SEARCH_RESULTS` - Default number of results (default: `10`)
 - `MAX_SEARCH_RESULTS` - Maximum allowed results (default: `20`)
+- `USE_RERANKER` - Enable re-ranker model for improved results (env var, default: `True`)
+- `RERANKER_MODEL` - Re-ranker model name (default: `cross-encoder/ms-marco-MiniLM-L-6-v2`)
+- `RERANKER_TOP_N` - Number of results to re-rank (default: `50`)
+- `USE_BM25` - Enable hybrid search with BM25 (env var, default: `False`)
 
 **Embedding Model:**
 - `EMBEDDING_MODEL` - Sentence transformer model (default: `all-MiniLM-L6-v2`)
@@ -332,7 +354,7 @@ Edit [app/config.py](app/config.py) to customize:
 
 **Startup Behavior:**
 - `FULL_SCAN_ON_BOOT` - Scan documents on server startup (env var, default: `False`)
-- `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Start folder watcher on startup (env var, default: `False`)
+- `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Start folder watcher on startup (env var, default: `True`)
 
 **Server Transport:**
 - `MCP_HOST` - HTTP server host (env var, default: `0.0.0.0`)
