@@ -19,12 +19,17 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # sentence-transformers model
 EMBEDDING_DIMENSION = 384  # Dimension for all-MiniLM-L6-v2
 
 # Chunking Configuration
+CHUNKING_STRATEGY = os.getenv('CHUNKING_STRATEGY', 'fixed_size').lower() # 'fixed_size' or 'by_paragraph'
 CHUNK_SIZE = 1000  # Characters per chunk
 CHUNK_OVERLAP = 200  # Overlap between chunks
 
 # Search Configuration
 DEFAULT_SEARCH_RESULTS: int = int(os.getenv('DEFAULT_SEARCH_RESULTS', '10'))
 MAX_SEARCH_RESULTS: int = int(os.getenv('MAX_SEARCH_RESULTS', '20'))
+USE_RERANKER = os.getenv('USE_RERANKER', 'True').lower() in ('true', '1', 'yes', 'on')
+RERANKER_MODEL = os.getenv('RERANKER_MODEL', 'cross-encoder/ms-marco-MiniLM-L-6-v2')
+RERANKER_TOP_N = int(os.getenv('RERANKER_TOP_N', '50'))
+
 
 # Topic/Folder Configuration
 USE_FOLDER_AS_TOPIC = True  # Use folder hierarchy as topic tags

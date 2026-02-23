@@ -7,9 +7,9 @@ information from a collection of documents stored in a vector database.
 """
 
 import asyncio
-import subprocess
 import time
 import sys
+import os
 from fastmcp import FastMCP
 from app.vector_store import VectorStore
 from app.config import (
@@ -31,6 +31,24 @@ from app.scan_all_my_documents import scan_all
 # Initialize the FastMCP server with the name "docs-to-ai"
 # This creates an MCP server instance that can expose tools to Claude
 mcp = FastMCP("docs-to-ai")
+
+# Configuration
+DOCS_DIR = os.getenv("DOCS_DIR", "/app/my-docs")
+
+def _format_file_size(size_in_bytes: int) -> str:
+    """Helper to format file size."""
+    if size_in_bytes > 1024 * 1024:
+        return f"{size_in_bytes / (1024*1024):.1f} MB"
+    elif size_in_bytes > 1024:
+        return f"{size_in_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_in_bytes} bytes"
+
+def _format_timestamp(timestamp: float) -> str:
+    """Helper to format timestamp."""
+    if timestamp:
+        return time.ctime(timestamp)
+    return "Unknown"
 
 # Tool implementations using @mcp.tool() decorator
 # Each function decorated with @mcp.tool() becomes available as a tool that Claude can call
@@ -186,20 +204,9 @@ def list_documents(topic: str | None = None) -> str:
             filetype = doc.get('filetype', '.pdf')
 
             # Format file size for human readability
-            file_size = doc.get('file_size', 0)
-            if file_size > 1024 * 1024:
-                size_str = f"{file_size / (1024*1024):.1f} MB"
-            elif file_size > 1024:
-                size_str = f"{file_size / 1024:.1f} KB"
-            else:
-                size_str = f"{file_size} bytes"
-
+            size_str = _format_file_size(doc.get('file_size', 0))
             # Format last modified timestamp as a readable date
-            last_modified = doc.get('last_modified', 0)
-            if last_modified:
-                mod_time = time.ctime(last_modified)
-            else:
-                mod_time = "Unknown"
+            mod_time = _format_timestamp(doc.get('last_modified', 0))
 
             # Display document information
             response_parts.append(f"  • {doc['filename']} ({filetype}) - Size: {size_str}, Modified: {mod_time}")
@@ -282,12 +289,7 @@ def get_collection_stats() -> str:
         total_size = sum(doc.get('file_size', 0) for doc in stats['documents'])
 
         # Format total size for human readability
-        if total_size > 1024 * 1024:
-            size_str = f"{total_size / (1024*1024):.1f} MB"
-        elif total_size > 1024:
-            size_str = f"{total_size / 1024:.1f} KB"
-        else:
-            size_str = f"{total_size} bytes"
+        size_str = _format_file_size(total_size)
 
         response += f"  Total size of all documents: {size_str}\n"
 
@@ -296,20 +298,9 @@ def get_collection_stats() -> str:
         response += "\nLargest documents:\n"
         for doc in sorted_docs[:5]:
             # Format file size for human readability
-            file_size = doc.get('file_size', 0)
-            if file_size > 1024 * 1024:
-                size_str = f"{file_size / (1024*1024):.1f} MB"
-            elif file_size > 1024:
-                size_str = f"{file_size / 1024:.1f} KB"
-            else:
-                size_str = f"{file_size} bytes"
-
+            size_str = _format_file_size(doc.get('file_size', 0))
             # Format last modified timestamp (note: this was incorrectly getting 'file_size')
-            last_modified = doc.get('last_modified', 0)  # Fixed: was 'file_size'
-            if last_modified:
-                mod_time = time.ctime(last_modified)
-            else:
-                mod_time = "Unknown"
+            mod_time = _format_timestamp(doc.get('last_modified', 0))
 
             # Display document information
             response += f"  {doc['filename']}: {size_str}, Modified: {mod_time}\n"
@@ -325,15 +316,12 @@ def scan_all_my_documents() -> str:
     then all documents are processed from scratch.
     """
     try:
-        # Set the document directory (Docker path)
-        doc_dir = "/app/my-docs"
-
         # Call the scan_all function which:
         # 1. Clears the existing database to prevent duplicates
         # 2. Scans all PDFs and Word docs in the directory
         # 3. Processes them into chunks and stores in the vector database
         # Returns list[TextContent] with debug info
-        result = scan_all(doc_dir)
+        result = scan_all(DOCS_DIR)
 
         # Extract text from TextContent objects for display
         if isinstance(result, list) and result:
@@ -351,9 +339,6 @@ def start_watching_folder() -> str:
     Performs a full scan (with database reset) once per week and on initial startup to prevent duplicates.
     """
     try:
-        # Define the base directory for documents (Docker path)
-        doc_dir = "/app/my-docs"
-
         # Create a callback function that will be triggered when file changes are detected
         # The callback determines whether to do an incremental update or a full scan
         # Returns list[TextContent] with debug info for MCP response
@@ -362,11 +347,11 @@ def start_watching_folder() -> str:
                 if incremental and changes:
                     # Process only the files that have changed (added, modified, deleted)
                     # This is more efficient than rescanning everything
-                    return process_incremental_changes(changes, doc_dir)
+                    return process_incremental_changes(changes, DOCS_DIR)
                 else:
                     # Do a full scan with database reset to prevent duplicates
                     # Full scans are triggered weekly or on initial startup
-                    return scan_all(doc_dir)
+                    return scan_all(DOCS_DIR)
             except Exception as e:
                 # Return error message on scan failure
                 print(f"[MCP] Error during scan: {e}", file=sys.stderr)
@@ -473,162 +458,6 @@ def get_time_of_last_folder_scan() -> str:
         return f"✗ Error getting last scan time: {str(e)}"
 
 
-# async def startup_initialization():
-#     """Perform initial scan and start folder watcher on server startup based on environment variables."""
-#     try:
-#         # Initialize the singleton VectorStore (will only initialize once)
-#         VectorStore()
-
-#         # print(f"[MCP] Starting initialization...", file=sys.stderr)
-#         print(f"[MCP]   FULL_SCAN_ON_BOOT: {FULL_SCAN_ON_BOOT}", file=sys.stderr)
-#         print(f"[MCP]   FOLDER_WATCHER_ACTIVE_ON_BOOT: {FOLDER_WATCHER_ACTIVE_ON_BOOT}", file=sys.stderr)
-
-#         doc_dir = "/app/my-docs"  # Docker path
-
-#         # Check if we should do anything on boot
-#         if not FULL_SCAN_ON_BOOT and not FOLDER_WATCHER_ACTIVE_ON_BOOT:
-#             # print("[MCP]   Skipping startup scan and folder watcher (disabled via environment variables)", file=sys.stderr)
-#             # print("[MCP]   You can manually trigger scanning using the 'scan_all_my_documents' tool", file=sys.stderr)
-#             # print("[MCP]   You can manually start folder watching using the 'start_watching_folder' tool", file=sys.stderr)
-#             return
-
-#         # Create a callback function for the folder watcher
-#         # Uses the singleton VectorStore internally
-#         def scan_callback(changes, incremental):
-#             try:
-#                 if incremental and changes:
-#                     # Process only the changed files
-#                     return process_incremental_changes(changes, doc_dir)
-#                 else:
-#                     # Do a full scan with database reset
-#                     # run_full_document_scan uses singleton VectorStore
-#                     return scan_all_my_documents(doc_dir)
-#             except Exception as e:
-#                 print(f"[MCP] Error during scan: {e}", file=sys.stderr)
-#                 import traceback
-#                 traceback.print_exc()
-#                 from mcp.types import TextContent
-#                 return [TextContent(
-#                     type="text",
-#                     text=f"✗ Error during scan: {str(e)}"
-#                 )]
-
-#         # Handle different combinations of environment variables
-#         if FOLDER_WATCHER_ACTIVE_ON_BOOT:
-#             # Start folder watcher with or without initial scan
-#             print(f"[MCP] Starting folder watcher (initial scan: {FULL_SCAN_ON_BOOT})...", file=sys.stderr)
-#             result = start_folder_watcher(scan_callback, do_initial_scan=FULL_SCAN_ON_BOOT)
-
-#             if result['status'] == 'started':
-#                 print(f"[MCP] ✓ Folder watcher started successfully", file=sys.stderr)
-#                 print(f"[MCP]   Watching: {result['watch_path']}", file=sys.stderr)
-#                 print(f"[MCP]   Debounce: {result['debounce_seconds']} seconds", file=sys.stderr)
-#                 print(f"[MCP]   Full scan interval: {result['full_scan_interval_days']} days", file=sys.stderr)
-
-#                 # Log scan result summary if available
-#                 if FULL_SCAN_ON_BOOT and 'scan_result' in result and result['scan_result']:
-#                     print(f"[MCP] ✓ Initial scan completed. Result:", file=sys.stderr)
-#                     print(f"{result['scan_result']}", file=sys.stderr)
-#             else:
-#                 print(f"[MCP] ⚠ Warning: Failed to start folder watcher: {result.get('message', 'Unknown error')}", file=sys.stderr)
-#                 print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool", file=sys.stderr)
-
-#         elif FULL_SCAN_ON_BOOT:
-#             # Only do a full scan without starting the watcher
-#             print("[MCP] Performing full scan (folder watcher disabled)...", file=sys.stderr)
-#             scan_result = scan_all_my_documents(doc_dir)
-#             if scan_result:
-#                 print(f"[MCP] ✓ Full scan completed", file=sys.stderr)
-#             print(f"[MCP]   Folder watcher is not active (disabled via environment variable)", file=sys.stderr)
-#             print(f"[MCP]   You can manually start it using the 'start_watching_folder' tool", file=sys.stderr)
-
-        
-
-#     except Exception as e:
-#         print(f"[MCP] ⚠ Warning: Error during startup initialization: {e}", file=sys.stderr)
-#         print(f"[MCP]   The server will continue, but automatic scanning/watching may not be active", file=sys.stderr)
-#         print(f"[MCP]   You can manually start features using the available tools", file=sys.stderr)
-#         import traceback
-#         traceback.print_exc()
-
-
-# async def main_stdio():
-#     """Run the MCP server via stdio."""
-#     from mcp.server.stdio import stdio_server
-
-#     # Perform startup initialization
-#     await startup_initialization()
-
-#     async with stdio_server() as (read_stream, write_stream):
-#         await mcp.run(
-#             read_stream,
-#             write_stream
-#         )
-
-#     print("mcp_server.py -- MCP server is shutting down.", file=sys.stderr)
-
-
-# async def main_websocket(host: str = "0.0.0.0", port: int = 38777):
-#     """Run the MCP server via SSE/WebSocket over HTTP."""
-#     from mcp.server.sse import SseServerTransport
-#     from starlette.applications import Starlette
-#     from starlette.routing import Route, Mount
-#     from starlette.responses import Response
-#     import uvicorn
-
-#     # Perform startup initialization
-#     await startup_initialization()
-
-#     # Create SSE transport
-#     sse = SseServerTransport("/messages/")
-
-#     async def handle_sse(request):
-#         """Handle SSE connection requests."""
-#         async with sse.connect_sse(
-#             request.scope, request.receive, request._send
-#         ) as streams:
-#             await mcp.run(
-#                 streams[0], streams[1]
-#             )
-#         return Response()
-
-#     # Create Starlette routes
-#     routes = [
-#         Route("/sse", endpoint=handle_sse, methods=["GET"]),
-#         Mount("/messages/", app=sse.handle_post_message),
-#     ]
-
-#     # Create Starlette app
-#     starlette_app = Starlette(
-#         routes=routes,
-#         on_shutdown=[shutdown_handler]
-#     )
-
-#     print(f"[MCP] Starting SSE/WebSocket server on {host}:{port}", file=sys.stderr)
-#     print(f"[MCP] SSE endpoint: http://{host}:{port}/sse", file=sys.stderr)
-#     print(f"[MCP] Messages endpoint: http://{host}:{port}/messages/", file=sys.stderr)
-
-#     # Run the server
-#     config = uvicorn.Config(
-#         starlette_app,
-#         host=host,
-#         port=port,
-#         log_level="info"
-#     )
-#     server = uvicorn.Server(config)
-#     await server.serve()
-
-
-# async def shutdown_handler():
-#     """Handle server shutdown."""
-#     print("[MCP] Server is shutting down...", file=sys.stderr)
-#     # try:
-#     #     stop_watching_folder()
-#     #     print("[MCP] Folder watcher stopped")
-#     # except Exception as e:
-#     #     print(f"[MCP] Error stopping folder watcher: {e}")
-
-
 async def main():
     """Main entry point - determine transport type from environment or arguments.
 
@@ -637,7 +466,6 @@ async def main():
     2. websocket/http - Runs an HTTP server with SSE for web-based clients
     """
     import sys
-    import os
 
     # Check for transport type from environment variable or command line
     # Default to stdio mode which is used by Claude Desktop
@@ -679,15 +507,13 @@ async def main():
         else:
             i += 1
 
-    # Run both transports concurrently (FastMCP supports dual-mode operation)
-    # Create async tasks for both stdio and HTTP transports
-    stdio_task = asyncio.create_task(mcp.run_stdio_async())
-    http_task = asyncio.create_task(mcp.run_http_async(host=host, port=port))
-
-    # Wait for either transport to stop (typically runs indefinitely until interrupted)
-    await asyncio.wait([stdio_task, http_task], return_when=asyncio.FIRST_COMPLETED)
+    # Run the requested transport
+    if transport == "websocket":
+        await mcp.run_http_async(host=host, port=port)
+    else:
+        # Default to stdio
+        await mcp.run_stdio_async()
 
 if __name__ == "__main__":
     # Run the main async function when script is executed directly
     asyncio.run(main())
-

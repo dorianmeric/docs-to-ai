@@ -1,14 +1,17 @@
 import chromadb
 from chromadb.config import Settings
 from chromadb.types import Metadata
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from typing import List, Dict, Optional, Any
 import json
 from app.config import (
     CHROMADB_DIR, 
     CHROMA_COLLECTION_NAME, 
     EMBEDDING_MODEL,
-    DEFAULT_SEARCH_RESULTS
+    DEFAULT_SEARCH_RESULTS,
+    USE_RERANKER,
+    RERANKER_MODEL,
+    RERANKER_TOP_N
 )
 import sys
 
@@ -49,6 +52,13 @@ class VectorStore:
         # Initialize embedding model
         # print(f"Loading embedding model: {EMBEDDING_MODEL}", file=sys.stderr)
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+        
+        # Initialize re-ranker model if enabled
+        self.cross_encoder = None
+        if USE_RERANKER:
+            print(f"Loading re-ranker model: {RERANKER_MODEL}", file=sys.stderr)
+            self.cross_encoder = CrossEncoder(RERANKER_MODEL)
+            print("Re-ranker is active.", file=sys.stderr)
 
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
@@ -122,7 +132,7 @@ class VectorStore:
     
     def search(self, query: str, n_results: int = DEFAULT_SEARCH_RESULTS) -> List[Dict]:
         """
-        Search for relevant document chunks.
+        Search for relevant document chunks, with optional re-ranking.
         
         Args:
             query: Search query
@@ -131,18 +141,20 @@ class VectorStore:
         Returns:
             List of search results with text, metadata, and relevance scores
         """
+        # Determine number of results to fetch for initial search
+        search_n_results = RERANKER_TOP_N if self.cross_encoder else n_results
+        
         # Generate query embedding
         query_embedding = self.embedding_model.encode([query])[0]
         
         # Search
         results = self.collection.query(
             query_embeddings=[query_embedding.tolist()],
-            n_results=n_results
+            n_results=search_n_results
         )
         
         # Format results
         formatted_results = []
-
         if results['ids'] and results['ids'][0] and results['metadatas'] and results['documents']:
             distances = results.get('distances')
             for i in range(len(results['ids'][0])):
@@ -153,8 +165,25 @@ class VectorStore:
                     'metadata': metadata,
                     'distance': distances[0][i] if distances and distances[0] else None
                 })
+        
+        # Re-rank if enabled
+        if self.cross_encoder and formatted_results:
+            print(f"Re-ranking top {len(formatted_results)} results...", file=sys.stderr)
+            
+            # Create pairs of [query, passage]
+            pairs = [[query, result['text']] for result in formatted_results]
+            
+            # Predict scores
+            scores = self.cross_encoder.predict(pairs, show_progress_bar=False)
+            
+            # Add scores to results and sort
+            for result, score in zip(formatted_results, scores):
+                result['relevance_score'] = float(score)
+                
+            # Sort by new relevance score
+            formatted_results.sort(key=lambda x: x['relevance_score'], reverse=True)
 
-        return formatted_results
+        return formatted_results[:n_results]
     
     def get_document(self, doc_id: str) -> Optional[Dict]:
         """

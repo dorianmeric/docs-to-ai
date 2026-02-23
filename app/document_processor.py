@@ -11,7 +11,7 @@ from docx import Document as DocxDocument
 import pandas as pd
 # from openpyxl import load_workbook
 # from io import BytesIO
-from app.config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC
+from app.config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, CHUNKING_STRATEGY
 
 
 class DocumentProcessor:
@@ -307,9 +307,86 @@ class DocumentProcessor:
         
         return result
     
+    def _create_chunk(self, text: str, metadata: Dict[str, Any], page_num: int, chunk_index: int) -> Dict[str, Any]:
+        """Helper to create a chunk dictionary with a unique ID."""
+        topics_str = '-'.join(metadata['topics'])
+        chunk_id = hashlib.md5(
+            f"{topics_str}-{metadata['filepath']}-{page_num}-{chunk_index}".encode()
+        ).hexdigest()
+        
+        return {
+            'id': chunk_id,
+            'text': text,
+            'metadata': {
+                **metadata,
+                'page': page_num,
+                'chunk_index': chunk_index,
+            }
+        }
+
+    def _chunk_with_fixed_size(self, text: str, metadata: Dict[str, Any], page_num: int) -> List[Dict[str, Any]]:
+        """Split text into fixed-size chunks with overlap."""
+        chunks = []
+        if not text.strip():
+            return []
+
+        for i in range(0, len(text), CHUNK_SIZE - CHUNK_OVERLAP):
+            chunk_text = text[i:i + CHUNK_SIZE]
+            if len(chunk_text.strip()) < 50:
+                continue
+            
+            chunk = self._create_chunk(chunk_text, metadata, page_num, i)
+            chunk['metadata']['chunk_start'] = i
+            chunk['metadata']['chunk_end'] = i + len(chunk_text)
+            chunks.append(chunk)
+            
+        return chunks
+
+    def _chunk_by_paragraph(self, text: str, metadata: Dict[str, Any], page_num: int) -> List[Dict[str, Any]]:
+        """Split text by paragraphs and group them into chunks."""
+        chunks = []
+        if not text.strip():
+            return []
+
+        paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+        
+        current_chunk = ""
+        chunk_index = 0
+        for i, p in enumerate(paragraphs):
+            # If a paragraph is larger than the chunk size, split it
+            if len(p) > CHUNK_SIZE:
+                if current_chunk:
+                    chunks.append(self._create_chunk(current_chunk, metadata, page_num, chunk_index))
+                    chunk_index += 1
+                    current_chunk = ""
+                
+                # Split the large paragraph
+                sub_chunks = self._chunk_with_fixed_size(p, metadata, page_num)
+                chunks.extend(sub_chunks)
+                chunk_index += len(sub_chunks)
+                continue
+
+            # Check if adding the next paragraph exceeds chunk size
+            if len(current_chunk) + len(p) + 1 > CHUNK_SIZE:
+                if current_chunk:
+                    chunks.append(self._create_chunk(current_chunk, metadata, page_num, chunk_index))
+                    chunk_index += 1
+                current_chunk = p
+            else:
+                if current_chunk:
+                    current_chunk += "\n" + p
+                else:
+                    current_chunk = p
+        
+        # Add the last remaining chunk
+        if current_chunk:
+            chunks.append(self._create_chunk(current_chunk, metadata, page_num, chunk_index))
+            
+        return chunks
+
     def chunk_text(self, pages_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Split text into chunks with overlap.
+        Split text into chunks based on the configured strategy.
         
         Args:
             pages_data: List of page data from extract_text_from_document
@@ -317,43 +394,21 @@ class DocumentProcessor:
         Returns:
             List of chunks with metadata
         """
-        chunks = []
+        all_chunks = []
         
         for page_data in pages_data:
             text = page_data['text']
-            page_num = page_data['page']
             metadata = page_data['metadata']
+            page_num = page_data['page']
+
+            if CHUNKING_STRATEGY == 'by_paragraph':
+                chunks = self._chunk_by_paragraph(text, metadata, page_num)
+            else:  # Default to 'fixed_size'
+                chunks = self._chunk_with_fixed_size(text, metadata, page_num)
             
-            # Skip empty pages
-            if not text.strip():
-                continue
+            all_chunks.extend(chunks)
             
-            # Split into chunks
-            for i in range(0, len(text), CHUNK_SIZE - CHUNK_OVERLAP):
-                chunk_text = text[i:i + CHUNK_SIZE]
-                
-                # Skip very small chunks
-                if len(chunk_text.strip()) < 50:
-                    continue
-                
-                # Include topics in chunk ID to ensure uniqueness
-                topics_str = '-'.join(metadata['topics'])
-                chunk_id = hashlib.md5(
-                    f"{topics_str}-{metadata['filepath']}-{page_num}-{i}".encode()
-                ).hexdigest()
-                
-                chunks.append({
-                    'id': chunk_id,
-                    'text': chunk_text,
-                    'metadata': {
-                        **metadata,
-                        'page': page_num,
-                        'chunk_start': i,
-                        'chunk_end': i + len(chunk_text)
-                    }
-                })
-        
-        return chunks
+        return all_chunks
     
     def process_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         """
