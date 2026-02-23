@@ -4,6 +4,7 @@ from chromadb.types import Metadata
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from typing import List, Dict, Optional, Any
 import json
+import re
 from app.config import (
     CHROMADB_DIR, 
     CHROMA_COLLECTION_NAME, 
@@ -130,30 +131,38 @@ class VectorStore:
             result['topics'] = [result.get('primary_topic', result.get('topic', 'uncategorized'))]
         return result
     
-    def search(self, query: str, n_results: int = DEFAULT_SEARCH_RESULTS) -> List[Dict]:
+    def search(
+        self, 
+        query: str, 
+        n_results: int = DEFAULT_SEARCH_RESULTS,
+        phrase_search: bool = False,
+        date_from: Optional[float] = None,
+        date_to: Optional[float] = None,
+        regex_pattern: Optional[str] = None
+    ) -> List[Dict]:
         """
         Search for relevant document chunks, with optional re-ranking.
         
         Args:
             query: Search query
             n_results: Number of results to return
+            phrase_search: If True, treat query as exact phrase (quote handling)
+            date_from: Filter results by minimum last_modified timestamp
+            date_to: Filter results by maximum last_modified timestamp
+            regex_pattern: Filter results by regex pattern in text
             
         Returns:
             List of search results with text, metadata, and relevance scores
         """
-        # Determine number of results to fetch for initial search
-        search_n_results = RERANKER_TOP_N if self.cross_encoder else n_results
+        search_n_results = RERANKER_TOP_N if self.cross_encoder else n_results * 3
         
-        # Generate query embedding
         query_embedding = self.embedding_model.encode([query])[0]
         
-        # Search
         results = self.collection.query(
             query_embeddings=[query_embedding.tolist()],
             n_results=search_n_results
         )
         
-        # Format results
         formatted_results = []
         if results['ids'] and results['ids'][0] and results['metadatas'] and results['documents']:
             distances = results.get('distances')
@@ -166,21 +175,46 @@ class VectorStore:
                     'distance': distances[0][i] if distances and distances[0] else None
                 })
         
-        # Re-rank if enabled
+        if phrase_search:
+            phrase_query = query.strip('"').lower()
+            filtered = []
+            for r in formatted_results:
+                if phrase_query in r['text'].lower():
+                    filtered.append(r)
+            formatted_results = filtered
+        
+        if date_from is not None or date_to is not None:
+            filtered = []
+            for r in formatted_results:
+                last_mod = r['metadata'].get('last_modified', 0)
+                if date_from is not None and last_mod < date_from:
+                    continue
+                if date_to is not None and last_mod > date_to:
+                    continue
+                filtered.append(r)
+            formatted_results = filtered
+        
+        if regex_pattern:
+            try:
+                compiled_regex = re.compile(regex_pattern, re.IGNORECASE)
+                filtered = []
+                for r in formatted_results:
+                    if compiled_regex.search(r['text']):
+                        filtered.append(r)
+                formatted_results = filtered
+            except re.error:
+                pass
+        
         if self.cross_encoder and formatted_results:
             print(f"Re-ranking top {len(formatted_results)} results...", file=sys.stderr)
             
-            # Create pairs of [query, passage]
             pairs = [[query, result['text']] for result in formatted_results]
             
-            # Predict scores
             scores = self.cross_encoder.predict(pairs, show_progress_bar=False)
             
-            # Add scores to results and sort
             for result, score in zip(formatted_results, scores):
                 result['relevance_score'] = float(score)
                 
-            # Sort by new relevance score
             formatted_results.sort(key=lambda x: x['relevance_score'], reverse=True)
 
         return formatted_results[:n_results]

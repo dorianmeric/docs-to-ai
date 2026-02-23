@@ -123,7 +123,11 @@ def _format_timestamp(timestamp: float) -> str:
 def search_documents(
     query: str,
     max_results: int = DEFAULT_SEARCH_RESULTS,
-    topic: str | None = None
+    topic: str | None = None,
+    phrase_search: bool = False,
+    date_from: float | None = None,
+    date_to: float | None = None,
+    regex_pattern: str | None = None
 ) -> str:
     """Search across all documents (PDFs and Word) using semantic similarity.
 
@@ -135,6 +139,10 @@ def search_documents(
         query: The search query to find relevant document chunks
         max_results: Maximum number of results to return (default: {DEFAULT_SEARCH_RESULTS}, max: {MAX_SEARCH_RESULTS})
         topic: Optional: Filter results to documents that have this topic (at any level in hierarchy)
+        phrase_search: If True, search for exact phrase match (use quotes in query)
+        date_from: Optional: Filter to documents modified after this timestamp (Unix timestamp)
+        date_to: Optional: Filter to documents modified before this timestamp (Unix timestamp)
+        regex_pattern: Optional: Filter results by regex pattern in text content
     """
     # Initialize connection to the vector database
     vector_store = VectorStore()
@@ -142,9 +150,15 @@ def search_documents(
     # Validate max_results is within acceptable bounds (1 to MAX_SEARCH_RESULTS)
     max_results = min(max(1, max_results), MAX_SEARCH_RESULTS)
 
-    # Perform search (get 3x more results if filtering by topic to compensate for filtering)
-    search_limit = max_results * 3 if topic else max_results
-    results = vector_store.search(query, n_results=search_limit)
+    search_limit = max_results * 3 if topic or phrase_search or regex_pattern else max_results
+    results = vector_store.search(
+        query, 
+        n_results=search_limit,
+        phrase_search=phrase_search,
+        date_from=date_from,
+        date_to=date_to,
+        regex_pattern=regex_pattern
+    )
 
     # Filter by topic if specified
     # Documents can have multiple topics from their folder hierarchy, so check if the
@@ -168,7 +182,17 @@ def search_documents(
         return f"No results found for query: '{query}'{filter_msg}"
 
     # Format results for display
-    filter_info = f" (filtered to topic: '{topic}')" if topic else ""
+    filter_parts = []
+    if topic:
+        filter_parts.append(f"topic: '{topic}'")
+    if phrase_search:
+        filter_parts.append("phrase match")
+    if date_from or date_to:
+        filter_parts.append("date filter")
+    if regex_pattern:
+        filter_parts.append("regex filter")
+    
+    filter_info = f" ({', '.join(filter_parts)})" if filter_parts else ""
     response_parts = [f"Found {len(results)} relevant chunks for query: '{query}'{filter_info}\n"]
 
     # Iterate through each search result and format it for display

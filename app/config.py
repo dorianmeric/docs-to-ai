@@ -12,16 +12,21 @@ DOC_CACHE_DIR.mkdir(exist_ok=True, parents=True)
 DOCS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Document Processing Configuration
-SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.xlsx', '.xls', '.xlsam', '.xlsb']  # Supported document types
+SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.xlsx', '.xls', '.xlsam', '.xlsb', '.pptx', '.html', '.htm', '.txt', '.csv']  # Supported document types
 
 # Embedding Configuration
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # sentence-transformers model
 EMBEDDING_DIMENSION = 384  # Dimension for all-MiniLM-L6-v2
 
 # Chunking Configuration
-CHUNKING_STRATEGY = os.getenv('CHUNKING_STRATEGY', 'by_paragraph').lower() # 'fixed_size' or 'by_paragraph'
-CHUNK_SIZE = 1000  # Characters per chunk
+CHUNKING_STRATEGY = os.getenv('CHUNKING_STRATEGY', 'by_paragraph').lower() # 'fixed_size', 'by_paragraph', 'semantic_heading', or 'by_token'
+CHUNK_SIZE = 1000  # Characters per chunk (or tokens if CHUNKING_STRATEGY='by_token')
 CHUNK_OVERLAP = 200  # Overlap between chunks
+CHUNK_BY_TOKEN = os.getenv('CHUNK_BY_TOKEN', 'False').lower() in ('true', '1', 'yes', 'on')  # Use token-based chunking
+TOKENIZER_MODEL = os.getenv('TOKENIZER_MODEL', 'cl100k_base')  # tiktoken tokenizer (cl100k_base for GPT-4/3.5, p50k_base for GPT-2)
+PRESERVE_HEADINGS = os.getenv('PRESERVE_HEADINGS', 'True').lower() in ('true', '1', 'yes', 'on')  # Preserve heading structure in chunks
+MAX_HEADING_CHUNK_SIZE = int(os.getenv('MAX_HEADING_CHUNK_SIZE', '2000'))  # Max chars per heading-based chunk
+MIN_CHUNK_SIZE = 50  # Minimum chunk size to avoid tiny chunks
 
 # Search Configuration
 DEFAULT_SEARCH_RESULTS: int = int(os.getenv('DEFAULT_SEARCH_RESULTS', '10'))
@@ -29,6 +34,8 @@ MAX_SEARCH_RESULTS: int = int(os.getenv('MAX_SEARCH_RESULTS', '20'))
 USE_RERANKER = os.getenv('USE_RERANKER', 'True').lower() in ('true', '1', 'yes', 'on')
 RERANKER_MODEL = os.getenv('RERANKER_MODEL', 'cross-encoder/ms-marco-MiniLM-L-6-v2')
 RERANKER_TOP_N = int(os.getenv('RERANKER_TOP_N', '50'))
+USE_BM25 = os.getenv('USE_BM25', 'False').lower() in ('true', '1', 'yes', 'on')  # Enable hybrid search with BM25
+BM25_WEIGHT = float(os.getenv('BM25_WEIGHT', '0.3'))  # Weight for BM25 in hybrid search (0-1)
 
 
 # Topic/Folder Configuration

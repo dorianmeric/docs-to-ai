@@ -4,14 +4,21 @@ from typing import List, Dict, Optional, Any
 import hashlib
 import json
 import sys
+import re
 from docx import Document as DocxDocument
-# import markdown ~ not used as we chose to stip the markdown formatting manually
-# from markdown.extensions import Extension
-# from markdown.preprocessors import Preprocessor
 import pandas as pd
-# from openpyxl import load_workbook
-# from io import BytesIO
-from .config import CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, CHUNKING_STRATEGY
+from bs4 import BeautifulSoup
+from .config import (
+    CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, 
+    CHUNKING_STRATEGY, CHUNK_BY_TOKEN, TOKENIZER_MODEL, PRESERVE_HEADINGS, 
+    MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE
+)
+
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
 
 
 class DocumentProcessor:
@@ -160,7 +167,6 @@ class DocumentProcessor:
             
             # Simple conversion: remove markdown formatting
             # Remove code blocks and inline code
-            import re
             
             # Remove code blocks
             text = re.sub(r'```[^`]*```', '', markdown_content, flags=re.DOTALL)
@@ -234,6 +240,165 @@ class DocumentProcessor:
             return []
         
         return pages_data
+
+    def extract_text_from_pptx(self, pptx_path: Path) -> List[Dict[str, Any]]:
+        """Extract text from PowerPoint presentation."""
+        pages_data = []
+        
+        try:
+            from pptx import Presentation
+            
+            prs = Presentation(str(pptx_path))
+            
+            for slide_num, slide in enumerate(prs.slides, start=1):
+                slide_text = []
+                
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        text = shape.text.strip()
+                        if text:
+                            slide_text.append(text)
+                
+                if slide_text:
+                    pages_data.append({
+                        'page': slide_num,
+                        'text': '\n'.join(slide_text),
+                        'total_pages': len(prs.slides)
+                    })
+                else:
+                    pages_data.append({
+                        'page': slide_num,
+                        'text': '',
+                        'total_pages': len(prs.slides)
+                    })
+                    
+        except Exception as e:
+            print(f"Error processing PowerPoint {pptx_path}: {e}", file=sys.stderr)
+            return []
+        
+        return pages_data
+
+    def extract_text_from_html(self, html_path: Path) -> List[Dict[str, Any]]:
+        """Extract text from HTML file."""
+        pages_data = []
+        
+        try:
+            with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+                html_content = f.read()
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            for script in soup(["script", "style"]):
+                script.decompose()
+            
+            text = soup.get_text(separator='\n')
+            
+            lines = (line.strip() for line in text.splitlines())
+            chunks = []
+            current_chunk = []
+            
+            for line in lines:
+                if line:
+                    current_chunk.append(line)
+                    if len('\n'.join(current_chunk)) > 2000:
+                        chunks.append('\n'.join(current_chunk))
+                        current_chunk = []
+            
+            if current_chunk:
+                chunks.append('\n'.join(current_chunk))
+            
+            for i, chunk in enumerate(chunks, start=1):
+                pages_data.append({
+                    'page': i,
+                    'text': chunk,
+                    'total_pages': len(chunks)
+                })
+            
+            if not pages_data:
+                pages_data.append({
+                    'page': 1,
+                    'text': '',
+                    'total_pages': 1
+                })
+                
+        except Exception as e:
+            print(f"Error processing HTML file {html_path}: {e}", file=sys.stderr)
+            return []
+        
+        return pages_data
+
+    def extract_text_from_txt(self, txt_path: Path) -> List[Dict[str, Any]]:
+        """Extract text from plain text file."""
+        pages_data = []
+        
+        try:
+            with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            lines = content.splitlines()
+            chunks = []
+            current_chunk = []
+            
+            for line in lines:
+                current_chunk.append(line)
+                if len('\n'.join(current_chunk)) > 2000:
+                    chunks.append('\n'.join(current_chunk))
+                    current_chunk = []
+            
+            if current_chunk:
+                chunks.append('\n'.join(current_chunk))
+            
+            for i, chunk in enumerate(chunks, start=1):
+                pages_data.append({
+                    'page': i,
+                    'text': chunk,
+                    'total_pages': len(chunks)
+                })
+            
+            if not pages_data:
+                pages_data.append({
+                    'page': 1,
+                    'text': '',
+                    'total_pages': 1
+                })
+                
+        except Exception as e:
+            print(f"Error processing text file {txt_path}: {e}", file=sys.stderr)
+            return []
+        
+        return pages_data
+
+    def extract_text_from_csv(self, csv_path: Path) -> List[Dict[str, Any]]:
+        """Extract text from CSV file with proper table handling."""
+        pages_data = []
+        
+        try:
+            df = pd.read_csv(csv_path)
+            
+            if not df.empty:
+                csv_text = f"Columns: {', '.join(str(col) for col in df.columns)}\n\n"
+                
+                for idx, row in df.iterrows():
+                    row_text = " | ".join(f"{col}: {row[col]}" for col in df.columns)
+                    csv_text += f"Row {idx + 1}: {row_text}\n"
+                
+                pages_data.append({
+                    'page': 1,
+                    'text': csv_text.strip(),
+                    'total_pages': 1
+                })
+            else:
+                pages_data.append({
+                    'page': 1,
+                    'text': '(Empty CSV file)',
+                    'total_pages': 1
+                })
+                
+        except Exception as e:
+            print(f"Error processing CSV file {csv_path}: {e}", file=sys.stderr)
+            return []
+        
+        return pages_data
     
     def extract_text_from_document(self, doc_path: str, base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -278,6 +443,14 @@ class DocumentProcessor:
             pages_data = self.extract_text_from_markdown(doc_file)
         elif extension in ['.xlsx', '.xls', '.xlsam', '.xlsb']:
             pages_data = self.extract_text_from_excel(doc_file)
+        elif extension == '.pptx':
+            pages_data = self.extract_text_from_pptx(doc_file)
+        elif extension in ['.html', '.htm']:
+            pages_data = self.extract_text_from_html(doc_file)
+        elif extension == '.txt':
+            pages_data = self.extract_text_from_txt(doc_file)
+        elif extension == '.csv':
+            pages_data = self.extract_text_from_csv(doc_file)
         else:
             print(f"Unsupported file type: {extension}", file=sys.stderr)
             return []
@@ -384,6 +557,107 @@ class DocumentProcessor:
             
         return chunks
 
+    def _chunk_by_token(self, text: str, metadata: Dict[str, Any], page_num: int) -> List[Dict[str, Any]]:
+        """Split text into token-based chunks with overlap."""
+        chunks = []
+        if not text.strip():
+            return []
+        
+        if not TIKTOKEN_AVAILABLE:
+            return self._chunk_with_fixed_size(text, metadata, page_num)
+        
+        try:
+            enc = tiktoken.get_encoding(TOKENIZER_MODEL)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
+        
+        tokens = enc.encode(text)
+        
+        for i in range(0, len(tokens), CHUNK_SIZE - CHUNK_OVERLAP):
+            chunk_tokens = tokens[i:i + CHUNK_SIZE]
+            chunk_text = enc.decode(chunk_tokens)
+            
+            if len(chunk_text.strip()) < MIN_CHUNK_SIZE:
+                continue
+            
+            chunk = self._create_chunk(chunk_text, metadata, page_num, i)
+            chunk['metadata']['chunk_start'] = i
+            chunk['metadata']['chunk_end'] = i + len(chunk_tokens)
+            chunk['metadata']['is_token_based'] = True
+            chunks.append(chunk)
+        
+        return chunks
+
+    def _extract_heading_structure(self, text: str) -> List[Dict[str, Any]]:
+        """Extract heading structure from text (markdown-style or HTML)."""
+        sections = []
+        
+        heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$|^(.+?)\n(=+|-+)$', re.MULTILINE)
+        
+        lines = text.split('\n')
+        current_section = {'heading': '', 'content': [], 'level': 0}
+        
+        for line in lines:
+            heading_match = heading_pattern.match(line)
+            
+            if heading_match:
+                if current_section['content']:
+                    sections.append(current_section)
+                    current_section = {'heading': '', 'content': [], 'level': 0}
+                
+                if heading_match.group(1):
+                    level = len(heading_match.group(1))
+                    heading = heading_match.group(2)
+                else:
+                    heading = heading_match.group(3)
+                    level = 1 if heading_match.group(4) == '=' else 2
+                
+                current_section = {'heading': heading.strip(), 'content': [], 'level': level}
+            else:
+                current_section['content'].append(line)
+        
+        if current_section['content']:
+            sections.append(current_section)
+        
+        return sections
+
+    def _chunk_by_heading(self, text: str, metadata: Dict[str, Any], page_num: int) -> List[Dict[str, Any]]:
+        """Split text by headings/sections while preserving structure."""
+        chunks = []
+        if not text.strip():
+            return []
+        
+        sections = self._extract_heading_structure(text)
+        
+        if not sections:
+            return self._chunk_with_fixed_size(text, metadata, page_num)
+        
+        chunk_index = 0
+        for section in sections:
+            section_text = '\n'.join(section['content'])
+            heading = section['heading']
+            
+            if not section_text.strip():
+                continue
+            
+            if len(section_text) <= MAX_HEADING_CHUNK_SIZE:
+                chunk = self._create_chunk(section_text, metadata, page_num, chunk_index)
+                chunk['metadata']['heading'] = heading
+                chunk['metadata']['heading_level'] = section['level']
+                chunk['metadata']['is_semantic_chunk'] = True
+                chunks.append(chunk)
+                chunk_index += 1
+            else:
+                sub_chunks = self._chunk_with_fixed_size(section_text, metadata, page_num)
+                for sc in sub_chunks:
+                    sc['metadata']['heading'] = heading
+                    sc['metadata']['heading_level'] = section['level']
+                    sc['metadata']['is_semantic_chunk'] = True
+                chunks.extend(sub_chunks)
+                chunk_index += len(sub_chunks)
+        
+        return chunks
+
     def chunk_text(self, pages_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Split text into chunks based on the configured strategy.
@@ -396,6 +670,8 @@ class DocumentProcessor:
         """
         all_chunks = []
         
+        use_token_chunking = CHUNK_BY_TOKEN or CHUNKING_STRATEGY == 'by_token'
+        
         for page_data in pages_data:
             text = page_data['text']
             metadata = page_data['metadata']
@@ -403,7 +679,11 @@ class DocumentProcessor:
 
             if CHUNKING_STRATEGY == 'by_paragraph':
                 chunks = self._chunk_by_paragraph(text, metadata, page_num)
-            else:  # Default to 'fixed_size'
+            elif CHUNKING_STRATEGY == 'semantic_heading' or (PRESERVE_HEADINGS and CHUNKING_STRATEGY != 'by_token'):
+                chunks = self._chunk_by_heading(text, metadata, page_num)
+            elif use_token_chunking:
+                chunks = self._chunk_by_token(text, metadata, page_num)
+            else:
                 chunks = self._chunk_with_fixed_size(text, metadata, page_num)
             
             all_chunks.extend(chunks)
