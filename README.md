@@ -1,6 +1,6 @@
 # Docs-to-AI -- Document Query System with MCP
 
-A A production-ready RAG that runs as a Model Context Protocol (MCP) server, which enables LLMs (like Claude Desktop or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
+A production-ready RAG that runs as a Model Context Protocol (MCP) server, which enables LLMs (like Claude Desktop or any other LLM that supports MCP) to query your documents using semantic search. Organizes documents by topics based on folder structure.
 Supports: PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, CSV.
 Supported extensions: .pdf, .docx, .doc, .xlsx, .xls, .xlsam, .xlsb, .md, .pptx, .html, .htm, .txt, .csv
 
