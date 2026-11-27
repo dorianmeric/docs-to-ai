@@ -16,16 +16,17 @@ The model used for document retrieval is all-MiniLM-L6-v2, with 384 dimensions f
 - Filter searches by topic/category
 - Handle multiple documents with the same filename across different topics
 - **Advanced Search**: Phrase matching, date-range filtering, regex pattern matching
-- **Smart Chunking**: Fixed-size, by-paragraph, semantic heading-based, or token-based chunking
+- **Smart Chunking**: Fixed-size, by-paragraph, semantic heading-based, token-based, or embedding-based semantic chunking
 - Preserve heading/section structure for smarter retrieval
 - Optional re-ranker model for improved search quality
+- **Fully configurable**: every setting can be overridden via environment variables, a `.env` file, or Docker build args
 
 ## Architecture
 
 ```
 Documents (PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, CSV)
   → Text Extraction
-    → Chunking (fixed/paragraph/heading/token)
+    → Chunking (fixed/paragraph/heading/token/semantic)
       → Embeddings
         → chromadb (with topic tags)
           ↓
@@ -215,16 +216,33 @@ The `docker-compose.yml` configures:
 - `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Set to `True` to start folder watcher on startup (default: `True`)
 - `MCP_PORT` - Customize HTTP port (default: `38777`)
 
+**All configuration is overridable.** Every setting from the [Configuration](#configuration) section can be passed either as a **build arg** (baked into the image, and used when pre-downloading models) or as a **runtime environment variable** (overrides the baked value without rebuilding). The defaults match `app/config.py`.
+
 Example with custom environment variables:
 ```bash
-# Create a .env file
+# Create a .env file (docker compose reads it automatically)
 echo "FULL_SCAN_ON_BOOT=True" > .env
 echo "FOLDER_WATCHER_ACTIVE_ON_BOOT=True" >> .env
 echo "MCP_PORT=38777" >> .env
+echo "CHUNKING_STRATEGY=semantic" >> .env
+echo "CHUNK_SIZE=800" >> .env
 
 # Start with environment variables
 docker compose up -d
 ```
+
+Example overriding a build arg (rebuilds the image with the new default):
+```bash
+docker compose build --build-arg CHUNKING_STRATEGY=semantic --build-arg CHUNK_SIZE=800
+docker compose up -d
+```
+
+Or with plain `docker build`:
+```bash
+docker build --build-arg EMBEDDING_MODEL=all-MiniLM-L6-v2 --build-arg USE_RERANKER=True -t mcp/docs-to-ai .
+```
+
+> **Tip:** If you change `EMBEDDING_MODEL` or `USE_RERANKER`, rebuild the image so the new models are pre-downloaded and baked in. Changing chunking/search settings only needs a runtime env var (no rebuild), but you must re-scan your documents for chunking changes to take effect.
 
 Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`):
 
@@ -256,13 +274,15 @@ You should now be able to ask your LLM questions about the documents.
 - `mcp_server.py` - Main MCP server implementation (FastMCP-based)
 - `app/document_processor.py` - Document text extraction and chunking (PDF, Word, Excel, Markdown)
 - `app/vector_store.py` - Vector database operations (ChromaDB)
+- `app/embeddings.py` - Shared embedding-model access (single instance per process)
 - `app/scan_all_my_documents.py` - Batch document ingestion script
 - `app/incremental_updater.py` - Incremental document update logic
 - `app/folder_watcher.py` - Automatic folder monitoring and change detection
-- `app/config.py` - Configuration settings
+- `app/config.py` - Configuration settings (all overridable via env vars / `.env`)
+- `.env.example` - Template for local configuration overrides
 - `pyproject.toml` - Python dependencies and project metadata (using `uv`)
-- `Dockerfile` - Docker container configuration
-- `docker-compose.yml` - Docker Compose configuration
+- `Dockerfile` - Docker container configuration (configurable via build args)
+- `docker-compose.yml` - Docker Compose configuration (build args + runtime env)
 
 ## MCP Tools
 
@@ -317,48 +337,120 @@ Once configured, you can ask Claude:
 
 ## Configuration
 
-Edit [app/config.py](app/config.py) to customize:
+Every setting has a built-in default (shown below) and can be overridden **without editing code** in three ways:
 
-**Document Processing:**
-- `SUPPORTED_EXTENSIONS` - File types to process (default: `.pdf`, `.docx`, `.doc`, `.md`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb`, `.pptx`, `.html`, `.htm`, `.txt`, `.csv`)
-- `CHUNKING_STRATEGY` - Chunking strategy: `fixed_size`, `by_paragraph`, `semantic_heading`, or `by_token` (default: `by_paragraph`)
-- `CHUNK_SIZE` - Characters per chunk (or tokens if `CHUNK_BY_TOKEN=true`) (default: `1000`)
-- `CHUNK_OVERLAP` - Overlap between chunks (default: `200`)
-- `CHUNK_BY_TOKEN` - Use token-based chunking instead of character-based (env var, default: `False`)
-- `TOKENIZER_MODEL` - TikToken tokenizer for token chunking (default: `cl100k_base`)
-- `PRESERVE_HEADINGS` - Preserve heading structure in chunks (env var, default: `True`)
-- `MAX_HEADING_CHUNK_SIZE` - Max chars per heading-based chunk (default: `2000`)
+1. **Environment variables** — highest priority, e.g. `CHUNKING_STRATEGY=semantic python mcp_server.py`
+2. **A `.env` file** — copy [.env.example](.env.example) to `.env` next to `pyproject.toml` and edit it. Real environment variables always win over `.env`.
+3. **Docker build args** — see [Docker Configuration](#docker-configuration) below.
 
-**Search Configuration:**
-- `DEFAULT_SEARCH_RESULTS` - Default number of results (default: `10`)
-- `MAX_SEARCH_RESULTS` - Maximum allowed results (default: `20`)
-- `USE_RERANKER` - Enable re-ranker model for improved results (env var, default: `True`)
-- `RERANKER_MODEL` - Re-ranker model name (default: `cross-encoder/ms-marco-MiniLM-L-6-v2`)
-- `RERANKER_TOP_N` - Number of results to re-rank (default: `50`)
-- `USE_BM25` - Enable hybrid search with BM25 (env var, default: `False`)
+Run `python mcp_server.py --show-config` to print the effective values, or `python mcp_server.py --help` for the full list with defaults.
 
-**Embedding Model:**
-- `EMBEDDING_MODEL` - Sentence transformer model (default: `all-MiniLM-L6-v2`)
-- `EMBEDDING_DIMENSION` - Vector dimension (default: `384`)
+### Chunking
 
-**Topic Configuration:**
-- `USE_FOLDER_AS_TOPIC` - Use folder hierarchy as topics (default: `True`)
-- `DEFAULT_TOPIC` - Default topic for uncategorized docs (default: `uncategorized`)
-- `TOPIC_SEPARATOR` - Display separator for hierarchical topics (default: ` > `)
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Strategy | `CHUNKING_STRATEGY` | `by_paragraph` | `fixed_size`, `by_paragraph`, `semantic_heading`, `by_token`, or `semantic` |
+| Chunk size | `CHUNK_SIZE` | `1000` | Characters per chunk (tokens when `CHUNK_BY_TOKEN=true`) |
+| Chunk overlap | `CHUNK_OVERLAP` | `200` | Overlap between chunks |
+| Token chunking | `CHUNK_BY_TOKEN` | `False` | Use token-based chunking instead of character-based |
+| Tokenizer | `TOKENIZER_MODEL` | `cl100k_base` | tiktoken tokenizer (`cl100k_base` for GPT-4/3.5, `p50k_base` for GPT-2) |
+| Preserve headings | `PRESERVE_HEADINGS` | `True` | Preserve heading structure in chunks |
+| Max heading chunk | `MAX_HEADING_CHUNK_SIZE` | `2000` | Max chars per heading-based chunk |
+| Min chunk size | `MIN_CHUNK_SIZE` | `50` | Minimum chunk size to avoid tiny chunks |
 
-**Storage:**
-- `CHROMADB_DIR` - Vector database location (default: `cache/chromadb`)
-- `DOC_CACHE_DIR` - Document cache location (default: `cache/doc_cache`)
-- `DOCS_DIR` - Documents directory (default: `my-docs`, configurable via `DOCS_DIR` env var)
-- `CHROMA_COLLECTION_NAME` - Collection name (default: `my-documents`)
+**Semantic chunking** (`CHUNKING_STRATEGY=semantic`) splits text where the embedding similarity between consecutive sentences drops below a percentile threshold, producing topically coherent chunks:
 
-**Startup Behavior:**
-- `FULL_SCAN_ON_BOOT` - Scan documents on server startup (env var, default: `False`)
-- `FOLDER_WATCHER_ACTIVE_ON_BOOT` - Start folder watcher on startup (env var, default: `True`)
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Split percentile | `SEMANTIC_CHUNK_PERCENTILE` | `95` | Similarity percentile used as the split threshold (0–100) |
+| Min size | `SEMANTIC_CHUNK_MIN_SIZE` | `200` | Minimum characters per semantic chunk |
+| Max size | `SEMANTIC_CHUNK_MAX_SIZE` | `2000` | Maximum characters per semantic chunk (hard split above this) |
+| Buffer size | `SEMANTIC_CHUNK_BUFFER_SIZE` | `1` | Neighbouring sentences combined when computing similarity |
 
-**Server Transport:**
-- `MCP_HOST` - HTTP server host (env var, default: `0.0.0.0`)
-- `MCP_PORT` - HTTP server port (env var, default: `38777`)
+> **Note on chunking strategy:** recent (2026) production studies find that sentence/recursive chunking matches embedding-based semantic chunking up to ~5k tokens at a fraction of the cost, and that semantic chunking can over-fragment. Semantic chunking is therefore offered as an **opt-in** strategy — start with `by_paragraph` or `semantic_heading` and switch only if your own retrieval metrics justify it.
+
+### Search
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Default results | `DEFAULT_SEARCH_RESULTS` | `10` | Default number of results returned |
+| Max results | `MAX_SEARCH_RESULTS` | `20` | Maximum allowed results |
+| Re-ranker | `USE_RERANKER` | `True` | Enable cross-encoder re-ranking for improved results |
+| Re-ranker model | `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder model name |
+| Re-rank candidates | `RERANKER_TOP_N` | `50` | Number of candidates to re-rank |
+| Hybrid BM25 | `USE_BM25` | `False` | Enable hybrid search with BM25 |
+| BM25 weight | `BM25_WEIGHT` | `0.3` | Weight for BM25 in hybrid search (0–1) |
+
+### Embedding model
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Model | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformer model |
+| Dimension | `EMBEDDING_DIMENSION` | `384` | Vector dimension (must match the model) |
+
+### Topics
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Folder as topic | `USE_FOLDER_AS_TOPIC` | `True` | Use folder hierarchy as topic tags |
+| Default topic | `DEFAULT_TOPIC` | `uncategorized` | Topic for uncategorized docs |
+| Separator | `TOPIC_SEPARATOR` | ` > ` | Display separator for hierarchical topics |
+
+### Storage
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Vector DB dir | — | `cache/chromadb` | ChromaDB location |
+| Doc cache dir | — | `cache/doc_cache` | Extracted-text cache location |
+| Documents dir | `DOCS_DIR` | `my-docs` | Documents directory |
+| Collection name | `CHROMA_COLLECTION_NAME` | `my-documents` | ChromaDB collection name |
+
+### Startup behaviour
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Full scan on boot | `FULL_SCAN_ON_BOOT` | `False` | Scan documents on server startup |
+| Watcher on boot | `FOLDER_WATCHER_ACTIVE_ON_BOOT` | `True` | Start folder watcher on startup |
+| Debounce | `DEBOUNCE_SECONDS` | `10` | Delay after last change before processing |
+| Full scan interval | `FULL_SCAN_INTERVAL_DAYS` | `7` | Days between full scans |
+
+### Server transport
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Transport | `MCP_TRANSPORT` | `stdio` | `stdio` or `websocket` |
+| Host | `MCP_HOST` | `0.0.0.0` | HTTP server host (websocket mode) |
+| Port | `MCP_PORT` | `38777` | HTTP server port (websocket mode) |
+
+### Example `.env`
+
+```bash
+# Copy .env.example to .env and uncomment what you need
+CHUNKING_STRATEGY=semantic
+CHUNK_SIZE=800
+CHUNK_OVERLAP=100
+USE_RERANKER=True
+DEFAULT_SEARCH_RESULTS=8
+```
+
+## Production RAG Recommendations
+
+The defaults in this project are deliberately conservative and run entirely locally. Based on recent (2026) production RAG research, the following changes give the largest quality gains, roughly in order of impact. Each is already configurable — no code changes needed.
+
+| # | Recommendation | How to enable | Why |
+|---|---|---|---|
+| 1 | **Upgrade the embedding model.** `all-MiniLM-L6-v2` is now a prototyping-tier model (384-dim, 256-token context). | `EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B` (1024-dim, 32K context) or `BAAI/bge-m3` (native dense+sparse hybrid). Set `EMBEDDING_DIMENSION` to match, then re-scan. | Newer models deliver large retrieval gains; MiniLM's 256-token context truncates document chunks. |
+| 2 | **Add hybrid BM25 + dense retrieval** and fuse with Reciprocal Rank Fusion. | `USE_BM25=True`, tune `BM25_WEIGHT`. | Dense-only retrieval misses exact terms (IDs, names, codes); hybrid lifts nDCG ~7%. |
+| 3 | **Keep cross-encoder re-ranking** over a wide candidate pool. | `USE_RERANKER=True`, `RERANKER_TOP_N=50`. | Highest-ROI layer: +15–30pp precision@5. Validate on your own corpus — a generic reranker can hurt on niche domains. |
+| 4 | **Reduce or drop chunk overlap.** | `CHUNK_OVERLAP=0`–`100`. | 2026 studies found overlap gave no measurable benefit while raising indexing cost. Keep some overlap only for corpora where facts straddle boundaries (legal clauses, tables). |
+| 5 | **Target 512–1024 tokens per chunk.** | `CHUNK_SIZE=800` (with `CHUNK_BY_TOKEN=True` for token units). | Quality degrades past ~2.5k tokens ("context cliff"); 512–1024 is the practical sweet spot. |
+| 6 | **Prefer paragraph/heading chunking; treat semantic chunking as opt-in.** | Keep `CHUNKING_STRATEGY=by_paragraph` or `semantic_heading`; try `semantic` only if metrics justify it. | Sentence/recursive chunking matches embedding-based semantic chunking up to ~5k tokens at far lower cost; semantic chunking can over-fragment. |
+| 7 | **Add diversity (MMR) to result selection.** | Not yet exposed as a setting — see roadmap. | MMR raised nDCG@5 by +4–11pp in 2026 benchmarks. |
+| 8 | **Tune ChromaDB HNSW for cosine space.** | Set collection `space="cosine"` and raise `ef_search` (100–200). | Default `l2` space is a poor fit for normalized text embeddings; higher `ef_search` improves recall. |
+| 9 | **Add RAG evaluation to CI.** | Use RAGAS (faithfulness, answer relevancy, context precision/recall) with ≥50–100 curated samples and a fixed judge model. | Component metrics separate retrieval failures from generation failures. |
+| 10 | **Apply metadata filters before re-ranking.** | Use the `topic`, `date_from`/`date_to`, and `regex_pattern` search filters. | Shrinks the candidate pool before expensive scoring. |
+
+**Deliberately not adopted:** *contextual retrieval* (LLM-written chunk prefixes) and *late chunking* — both add large indexing cost (contextual retrieval ~120× slower) for gains that are unproven on small local corpora, and late chunking can hurt short passages.
 
 ## License
 

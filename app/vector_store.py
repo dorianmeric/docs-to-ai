@@ -1,7 +1,7 @@
 import chromadb
 from chromadb.config import Settings
 from chromadb.types import Metadata
-from sentence_transformers import SentenceTransformer, CrossEncoder
+from sentence_transformers import CrossEncoder
 from typing import List, Dict, Optional, Any
 import json
 import re
@@ -14,6 +14,7 @@ from app.config import (
     RERANKER_MODEL,
     RERANKER_TOP_N
 )
+from app.embeddings import get_embedding_model
 import sys
 
 
@@ -50,9 +51,9 @@ class VectorStore:
             )
         )
 
-        # Initialize embedding model
+        # Initialize embedding model (shared process-wide instance)
         # print(f"Loading embedding model: {EMBEDDING_MODEL}", file=sys.stderr)
-        self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+        self.embedding_model = get_embedding_model()
         
         # Initialize re-ranker model if enabled
         self.cross_encoder = None

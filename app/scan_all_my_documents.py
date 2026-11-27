@@ -246,7 +246,23 @@ def main():
     """
     # Set up command-line argument parser
     parser = argparse.ArgumentParser(
-        description="Ingest documents (PDF, Word, Markdown, Excel) into the vector store"
+        description="Ingest documents (PDF, Word, Markdown, Excel) into the vector store",
+        epilog=(
+            "Chunking and search settings are read from environment variables or a .env file.\n"
+            "Defaults: CHUNKING_STRATEGY=by_paragraph, CHUNK_SIZE=1000, CHUNK_OVERLAP=200,\n"
+            "CHUNK_BY_TOKEN=False, TOKENIZER_MODEL=cl100k_base, PRESERVE_HEADINGS=True,\n"
+            "MAX_HEADING_CHUNK_SIZE=2000, MIN_CHUNK_SIZE=50,\n"
+            "SEMANTIC_CHUNK_PERCENTILE=95, SEMANTIC_CHUNK_MIN_SIZE=200,\n"
+            "SEMANTIC_CHUNK_MAX_SIZE=2000, SEMANTIC_CHUNK_BUFFER_SIZE=1,\n"
+            "EMBEDDING_MODEL=all-MiniLM-L6-v2, EMBEDDING_DIMENSION=384,\n"
+            "USE_RERANKER=True, RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2,\n"
+            "RERANKER_TOP_N=50, USE_BM25=False, BM25_WEIGHT=0.3,\n"
+            "DEFAULT_SEARCH_RESULTS=10, MAX_SEARCH_RESULTS=20,\n"
+            "USE_FOLDER_AS_TOPIC=True, DEFAULT_TOPIC=uncategorized,\n"
+            "CHROMA_COLLECTION_NAME=my-documents.\n"
+            "Run 'python mcp_server.py --show-config' to print the effective values."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--doc-dir",

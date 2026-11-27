@@ -8,7 +8,9 @@ import re
 from .config import (
     CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, 
     CHUNKING_STRATEGY, CHUNK_BY_TOKEN, TOKENIZER_MODEL, PRESERVE_HEADINGS, 
-    MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE
+    MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE,
+    SEMANTIC_CHUNK_PERCENTILE, SEMANTIC_CHUNK_MIN_SIZE, SEMANTIC_CHUNK_MAX_SIZE,
+    SEMANTIC_CHUNK_BUFFER_SIZE
 )
 
 from .extractors import (
@@ -263,6 +265,114 @@ class DocumentProcessor:
         
         return chunks
 
+    def _split_sentences(self, text: str) -> List[str]:
+        """Split text into sentences for semantic chunking.
+
+        Uses a lightweight regex splitter so no extra NLP dependency is needed.
+        Falls back to line splitting when no sentence punctuation is present.
+        """
+        # Split after ., !, ? (optionally followed by quotes/brackets) when
+        # followed by whitespace. Keeps the punctuation with the sentence.
+        parts = re.split(r'(?<=[.!?])["\')\]]*\s+', text)
+        sentences = [s.strip() for s in parts if s and s.strip()]
+
+        if len(sentences) <= 1:
+            # No sentence boundaries found (e.g. tables, code) - fall back to lines
+            sentences = [line.strip() for line in text.split('\n') if line.strip()]
+
+        return sentences
+
+    def _chunk_semantic(self, text: str, metadata: Dict[str, Any], page_num: int) -> List[Dict[str, Any]]:
+        """Split text into semantically coherent chunks using embedding similarity.
+
+        Consecutive sentences are embedded and the cosine distance between
+        neighbouring windows is computed. Boundaries are placed where the
+        distance exceeds the configured percentile threshold (i.e. the most
+        dissimilar transitions), so each chunk stays on a single topic. Chunks
+        are then clamped to the min/max size bounds.
+        """
+        chunks = []
+        if not text.strip():
+            return []
+
+        sentences = self._split_sentences(text)
+        if not sentences:
+            return []
+        if len(sentences) == 1:
+            # Single sentence: emit directly, or hard-split if it exceeds the max size
+            if len(sentences[0]) <= SEMANTIC_CHUNK_MAX_SIZE:
+                chunk = self._create_chunk(sentences[0], metadata, page_num, 0)
+                chunk['metadata']['is_semantic_chunk'] = True
+                return [chunk]
+            return self._chunk_with_fixed_size(text, metadata, page_num)
+
+        try:
+            import numpy as np
+            from .embeddings import get_embedding_model
+
+            model = get_embedding_model()
+            embeddings = model.encode(sentences, show_progress_bar=False, normalize_embeddings=True)
+            embeddings = np.asarray(embeddings)
+
+            # Combine each sentence with its neighbours to smooth the signal
+            buffer = max(0, SEMANTIC_CHUNK_BUFFER_SIZE)
+            if buffer > 0:
+                windows = []
+                for i in range(len(embeddings)):
+                    start = max(0, i - buffer)
+                    end = min(len(embeddings), i + buffer + 1)
+                    windows.append(embeddings[start:end].mean(axis=0))
+                embeddings = np.asarray(windows)
+
+            # Cosine distance between consecutive sentence windows (higher = more dissimilar)
+            distances = 1.0 - np.sum(embeddings[:-1] * embeddings[1:], axis=1)
+
+            # Split at the most dissimilar boundaries: those above the given
+            # percentile of the distance distribution (e.g. 95 -> top 5%).
+            threshold = float(np.percentile(distances, SEMANTIC_CHUNK_PERCENTILE))
+            split_indices = {i + 1 for i, dist in enumerate(distances) if dist > threshold}
+        except Exception as e:
+            print(f"Semantic chunking unavailable ({e}); falling back to paragraph chunking", file=sys.stderr)
+            return self._chunk_by_paragraph(text, metadata, page_num)
+
+        # Group sentences into chunks, respecting the split boundaries and size bounds
+        chunk_index = 0
+        current: List[str] = []
+        current_len = 0
+
+        def flush():
+            nonlocal current, current_len, chunk_index
+            if not current:
+                return
+            chunk_text = ' '.join(current).strip()
+            if chunk_text:
+                chunk = self._create_chunk(chunk_text, metadata, page_num, chunk_index)
+                chunk['metadata']['is_semantic_chunk'] = True
+                chunks.append(chunk)
+                chunk_index += 1
+            current = []
+            current_len = 0
+
+        for i, sentence in enumerate(sentences):
+            sentence_len = len(sentence)
+            # Hard split if adding this sentence would exceed the max size
+            if current and current_len + sentence_len + 1 > SEMANTIC_CHUNK_MAX_SIZE:
+                flush()
+            current.append(sentence)
+            current_len += sentence_len + 1
+            # Soft split at a detected semantic boundary once the min size is met
+            if i + 1 in split_indices and current_len >= SEMANTIC_CHUNK_MIN_SIZE:
+                flush()
+
+        flush()
+
+        # Merge any trailing chunk that is too small into the previous one
+        if len(chunks) > 1 and len(chunks[-1]['text']) < SEMANTIC_CHUNK_MIN_SIZE:
+            tail = chunks.pop()
+            chunks[-1]['text'] = chunks[-1]['text'] + ' ' + tail['text']
+
+        return chunks
+
     def _extract_heading_structure(self, text: str) -> List[Dict[str, Any]]:
         """Extract heading structure from text (markdown-style or HTML)."""
         sections = []
@@ -352,7 +462,9 @@ class DocumentProcessor:
             metadata = page_data['metadata']
             page_num = page_data['page']
 
-            if CHUNKING_STRATEGY == 'by_paragraph':
+            if CHUNKING_STRATEGY == 'semantic':
+                chunks = self._chunk_semantic(text, metadata, page_num)
+            elif CHUNKING_STRATEGY == 'by_paragraph':
                 chunks = self._chunk_by_paragraph(text, metadata, page_num)
             elif CHUNKING_STRATEGY == 'semantic_heading' or (PRESERVE_HEADINGS and CHUNKING_STRATEGY != 'by_token'):
                 chunks = self._chunk_by_heading(text, metadata, page_num)

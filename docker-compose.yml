@@ -3,6 +3,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Build-time configuration. Override any of these in a .env file or the
+      # shell, e.g. CHUNKING_STRATEGY=semantic docker compose build
+      args:
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+        EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+        USE_RERANKER: ${USE_RERANKER:-True}
+        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
+        CHUNKING_STRATEGY: ${CHUNKING_STRATEGY:-by_paragraph}
+        CHUNK_SIZE: ${CHUNK_SIZE:-1000}
+        CHUNK_OVERLAP: ${CHUNK_OVERLAP:-200}
+        CHUNK_BY_TOKEN: ${CHUNK_BY_TOKEN:-False}
+        TOKENIZER_MODEL: ${TOKENIZER_MODEL:-cl100k_base}
+        PRESERVE_HEADINGS: ${PRESERVE_HEADINGS:-True}
+        MAX_HEADING_CHUNK_SIZE: ${MAX_HEADING_CHUNK_SIZE:-2000}
+        MIN_CHUNK_SIZE: ${MIN_CHUNK_SIZE:-50}
+        SEMANTIC_CHUNK_PERCENTILE: ${SEMANTIC_CHUNK_PERCENTILE:-95}
+        SEMANTIC_CHUNK_MIN_SIZE: ${SEMANTIC_CHUNK_MIN_SIZE:-200}
+        SEMANTIC_CHUNK_MAX_SIZE: ${SEMANTIC_CHUNK_MAX_SIZE:-2000}
+        SEMANTIC_CHUNK_BUFFER_SIZE: ${SEMANTIC_CHUNK_BUFFER_SIZE:-1}
+        DEFAULT_SEARCH_RESULTS: ${DEFAULT_SEARCH_RESULTS:-10}
+        MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS:-20}
+        RERANKER_TOP_N: ${RERANKER_TOP_N:-50}
+        USE_BM25: ${USE_BM25:-False}
+        BM25_WEIGHT: ${BM25_WEIGHT:-0.3}
+        USE_FOLDER_AS_TOPIC: ${USE_FOLDER_AS_TOPIC:-True}
+        DEFAULT_TOPIC: ${DEFAULT_TOPIC:-uncategorized}
+        CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-my-documents}
+        FULL_SCAN_ON_BOOT: ${FULL_SCAN_ON_BOOT:-False}
+        FOLDER_WATCHER_ACTIVE_ON_BOOT: ${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}
+        DEBOUNCE_SECONDS: ${DEBOUNCE_SECONDS:-10}
+        FULL_SCAN_INTERVAL_DAYS: ${FULL_SCAN_INTERVAL_DAYS:-7}
     container_name: docs-to-ai
     image: mcp/docs-to-ai
 
@@ -12,13 +43,38 @@ services:
       - ./cache/doc_cache:/app/cache/doc_cache # Document cache (persists extracted text)
       - ./my-docs:/app/my-docs:ro  # Documents directory (your PDFs and Word docs)# Read-only to prevent accidental modifications
 
-    # Environment variables (optional)
+    # Environment variables (optional). These override the values baked into
+    # the image at build time, so you can retune without rebuilding.
     environment:
       - PYTHONUNBUFFERED=1 # ensures that the python output i.e. the stdout and stderr streams are sent straight to terminal (e.g. your container log) without being first buffered
-      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      - CHUNKING_STRATEGY=${CHUNKING_STRATEGY:-by_paragraph}
+      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
+      - CHUNK_BY_TOKEN=${CHUNK_BY_TOKEN:-False}
+      - TOKENIZER_MODEL=${TOKENIZER_MODEL:-cl100k_base}
+      - PRESERVE_HEADINGS=${PRESERVE_HEADINGS:-True}
+      - MAX_HEADING_CHUNK_SIZE=${MAX_HEADING_CHUNK_SIZE:-2000}
+      - MIN_CHUNK_SIZE=${MIN_CHUNK_SIZE:-50}
+      - SEMANTIC_CHUNK_PERCENTILE=${SEMANTIC_CHUNK_PERCENTILE:-95}
+      - SEMANTIC_CHUNK_MIN_SIZE=${SEMANTIC_CHUNK_MIN_SIZE:-200}
+      - SEMANTIC_CHUNK_MAX_SIZE=${SEMANTIC_CHUNK_MAX_SIZE:-2000}
+      - SEMANTIC_CHUNK_BUFFER_SIZE=${SEMANTIC_CHUNK_BUFFER_SIZE:-1}
+      - USE_RERANKER=${USE_RERANKER:-True}
+      - RERANKER_MODEL=${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
+      - RERANKER_TOP_N=${RERANKER_TOP_N:-50}
+      - USE_BM25=${USE_BM25:-False}
+      - BM25_WEIGHT=${BM25_WEIGHT:-0.3}
+      - DEFAULT_SEARCH_RESULTS=${DEFAULT_SEARCH_RESULTS:-10}
+      - MAX_SEARCH_RESULTS=${MAX_SEARCH_RESULTS:-20}
+      - USE_FOLDER_AS_TOPIC=${USE_FOLDER_AS_TOPIC:-True}
+      - DEFAULT_TOPIC=${DEFAULT_TOPIC:-uncategorized}
+      - CHROMA_COLLECTION_NAME=${CHROMA_COLLECTION_NAME:-my-documents}
       # Startup behavior control (defaults to True if not set)
       - FULL_SCAN_ON_BOOT=${FULL_SCAN_ON_BOOT:-False}
       - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}
+      - DEBOUNCE_SECONDS=${DEBOUNCE_SECONDS:-10}
+      - FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS:-7}
       # # MCP server transport configuration
       # - MCP_TRANSPORT=${MCP_TRANSPORT:-stdio}
       # - MCP_HOST=${MCP_HOST:-0.0.0.0}
