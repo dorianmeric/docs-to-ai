@@ -113,18 +113,11 @@ services:
     # Restart policy
     restart: unless-stopped
 
-    # GPU passthrough (optional). Uncomment to expose NVIDIA GPUs to the
-    # container; requires the NVIDIA driver + NVIDIA Container Toolkit on the
-    # host, and a CUDA-enabled torch build (the PyPI Linux wheel is CUDA-enabled).
-    # Remove this block on hosts without a GPU, otherwise `docker compose up`
-    # fails while reserving the device.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all          # or `device_ids: ['0']` to pin a GPU
-    #           capabilities: [gpu]
+    # GPU passthrough is not enabled here, because it makes `docker compose up`
+    # fail on hosts without an NVIDIA GPU. Add it with the override file:
+    #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+    # or copy the deploy block from docker-compose.gpu.yml below. To keep plain
+    # `docker compose up -d`, set COMPOSE_FILE in .env (see .env.example).
 
     # Resource limits (optional - adjust based on your needs)
     # deploy:

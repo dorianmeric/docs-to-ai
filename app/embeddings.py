@@ -16,12 +16,12 @@ Both normalise the output vectors, which is what the ChromaDB collection is
 created with (``space="cosine"``).
 """
 
-import sys
 from typing import List, Optional, Sequence
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from .logging_utils import log_info, log_warn
 from .config import EMBEDDING_MODEL, EMBEDDING_BATCH_SIZE, EMBEDDING_QUERY_PROMPT
 from .device import describe_device, resolve_device
 from .errors import DocsToAIError, explain
@@ -36,10 +36,7 @@ def get_embedding_model() -> SentenceTransformer:
     global _model
     if _model is None:
         device = resolve_device()
-        print(
-            f"Loading embedding model: {EMBEDDING_MODEL} on {describe_device(device)}",
-            file=sys.stderr
-        )
+        log_info(f"Loading embedding model: {EMBEDDING_MODEL} on {describe_device(device)}", component="Embeddings")
         try:
             _model = SentenceTransformer(EMBEDDING_MODEL, device=device)
         except Exception as exc:
@@ -76,7 +73,7 @@ def _get_query_prompt() -> Optional[str]:
         _query_prompt = prompts.get("query") or None
 
     if _query_prompt:
-        print(f"Using query instruction prompt for {EMBEDDING_MODEL}", file=sys.stderr)
+        log_info(f"Using query instruction prompt for {EMBEDDING_MODEL}", component="Embeddings")
     return _query_prompt
 
 
@@ -134,5 +131,5 @@ def get_embedding_dimension() -> Optional[int]:
     try:
         return int(getter())
     except Exception as e:
-        print(f"Could not determine embedding dimension: {e}", file=sys.stderr)
+        log_warn(f"Could not determine embedding dimension: {e}", component="Embeddings")
         return None

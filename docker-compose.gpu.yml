@@ -1,0 +1,32 @@
+# GPU passthrough override for docker-compose.yml.
+#
+# Use this file when the host has an NVIDIA GPU:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# To make plain `docker compose up -d` use it, put COMPOSE_FILE in .env. The
+# separator is ';' on Windows and ':' on Linux/macOS:
+#
+#   COMPOSE_FILE=docker-compose.yml;docker-compose.gpu.yml      (Windows)
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml      (Linux/macOS)
+#
+# Requirements:
+#   - NVIDIA driver on the host (Windows: the normal GeForce/Quadro driver).
+#   - Linux hosts: the NVIDIA Container Toolkit (nvidia-container-toolkit).
+#   - Docker Desktop on Windows/macOS: the WSL2 based engine, which is the default.
+#
+# Verify the container can see the GPU:
+#
+#   docker run --rm --gpus all mcp/docs-to-ai nvidia-smi
+#   docker logs docs-to-ai | grep "Compute device"
+#
+# Expect: Compute device: cuda:0 (NVIDIA GeForce RTX 5090, 32 GB VRAM)
+services:
+  docs-to-ai:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all # or device_ids: ['0'] to pin one GPU
+              capabilities: [gpu]

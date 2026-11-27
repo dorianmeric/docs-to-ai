@@ -33,19 +33,34 @@ from app.mcp_tools import (
     stop_watching_folder as _stop_watching_folder,
     get_time_of_last_folder_scan as _get_time_of_last_folder_scan
 )
+from app.logging_utils import log_error, log_info, log_success, log_warn
 from app.config import (
+    DOCS_DIR as CONFIGURED_DOCS_DIR,
     FULL_SCAN_ON_BOOT,
     FOLDER_WATCHER_ACTIVE_ON_BOOT
 )
 
-DOCS_DIR = os.getenv("DOCS_DIR", "/app/my-docs")
+# Single source of truth: the same resolved folder the tools and watcher use
+DOCS_DIR = str(CONFIGURED_DOCS_DIR)
+
+
+def _log_scan_summary(scan_result: object) -> None:
+    """Log the important scan lines, so the container log shows what was indexed."""
+    keys = ("Found ", "Total documents", "Total chunks", "Successful:", "Failed:", "Problem:", "No supported")
+    lines = [
+        line.strip() for line in str(scan_result).splitlines()
+        if line.strip() and any(key in line for key in keys)
+    ]
+    if not lines:
+        return
+    log_info("\n".join(lines), component="MCP Server")
 
 
 @asynccontextmanager
 async def lifespan(app):
     """Handle startup and shutdown of the MCP server."""
     if FOLDER_WATCHER_ACTIVE_ON_BOOT:
-        print(f"[MCP Server] FOLDER_WATCHER_ACTIVE_ON_BOOT is enabled, starting folder watcher...", file=sys.stderr)
+        log_info("FOLDER_WATCHER_ACTIVE_ON_BOOT is enabled, starting the folder watcher...", component="MCP Server")
         
         def scan_callback(changes, incremental):
             if incremental:
@@ -56,27 +71,28 @@ async def lifespan(app):
         result = start_folder_watcher_impl(scan_callback, do_initial_scan=FULL_SCAN_ON_BOOT)
         
         if result["status"] == "started":
-            print(f"[MCP Server] Folder watcher started automatically", file=sys.stderr)
-            print(f"[MCP Server]   Watching: {result['watch_path']}", file=sys.stderr)
-            print(f"[MCP Server]   Debounce: {result['debounce_seconds']}s", file=sys.stderr)
-            print(f"[MCP Server]   Full scan interval: {result['full_scan_interval_days']} days", file=sys.stderr)
+            log_success("Folder watcher started automatically", component="MCP Server")
+            log_info(f"Watching: {result['watch_path']}", component="MCP Server")
+            log_info(f"Debounce: {result['debounce_seconds']}s", component="MCP Server")
+            log_info(f"Full scan interval: {result['full_scan_interval_days']} days", component="MCP Server")
             if result.get('scan_result'):
-                print(f"[MCP Server]   Initial scan completed", file=sys.stderr)
+                log_success("Initial scan finished", component="MCP Server")
+                _log_scan_summary(result['scan_result'])
         else:
-            print(f"[MCP Server] Warning: Could not start folder watcher: {result.get('message')}", file=sys.stderr)
+            log_warn(f"Could not start the folder watcher: {result.get('message')}", component="MCP Server")
     else:
-        print(f"[MCP Server] Folder watcher auto-start disabled", file=sys.stderr)
-        print(f"[MCP Server] Use the 'start_watching_folder' tool to start it manually", file=sys.stderr)
+        log_info("Folder watcher auto-start disabled", component="MCP Server")
+        log_info("Use the 'start_watching_folder' tool to start it manually", component="MCP Server")
     
     yield
     
     if is_watching():
-        print("[MCP Server] Shutting down folder watcher...", file=sys.stderr)
+        log_info("Shutting down the folder watcher...", component="MCP Server")
         result = stop_folder_watcher_impl()
         if result["status"] == "stopped":
-            print("[MCP Server] Folder watcher stopped", file=sys.stderr)
+            log_success("Folder watcher stopped", component="MCP Server")
         else:
-            print(f"[MCP Server] Warning: Error stopping folder watcher: {result.get('message')}", file=sys.stderr)
+            log_error(f"Could not stop the folder watcher: {result.get('message')}", component="MCP Server")
 
 
 mcp = FastMCP("docs-to-ai", lifespan=lifespan)
@@ -296,10 +312,10 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except DocsToAIError as exc:
-        print(exc.message(), file=sys.stderr)
+        log_error(exc.message(), component="MCP Server")
         sys.exit(1)
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception as exc:
-        print(explain(exc, context="mcp_server"), file=sys.stderr)
+        log_error(explain(exc, context="mcp_server"), component="MCP Server")
         sys.exit(1)

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
+from .logging_utils import log_error
 from .config import (
     DEBOUNCE_SECONDS,
     SUPPORTED_EXTENSIONS,
@@ -199,4 +200,4 @@ class IncrementalChangeHandler(FileSystemEventHandler):
         try:
             self.callback(deduplicated_changes, incremental=True)
         except Exception as e:
-            print(f"[FileHandler] Error in callback: {e}", flush=True)
+            log_error(f"Scan callback failed: {e}", component="FileHandler")

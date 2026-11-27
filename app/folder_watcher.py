@@ -159,6 +159,8 @@ from datetime import datetime
 from typing import Callable, Dict, List, Optional, Set, Tuple
 from watchdog.observers import Observer
 
+from .logging_utils import log_error, log_info, log_success, log_warn
+
 from app.config import (
     DOCS_DIR,
     FULL_SCAN_ON_BOOT,
@@ -215,6 +217,18 @@ _pending_changes_lock = threading.Lock()
 # _debounce_timer: Timer for debouncing file changes
 _debounce_timer: Optional[threading.Timer] = None
 _debounce_timer_lock = threading.Lock()
+
+
+def _count_supported_documents(path: Path) -> int:
+    """Count files with a supported extension under ``path`` (recursive)."""
+    count = 0
+    try:
+        for candidate in path.rglob('*'):
+            if candidate.is_file() and candidate.suffix.lower() in SUPPORTED_EXTENSIONS:
+                count += 1
+    except OSError:
+        return count
+    return count
 
 
 def _stop_observer_after_failed_start() -> None:
@@ -316,6 +330,19 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
             "watch_path": str(watch_path)
         }
 
+    # Say what is visible before scanning. An empty bind mount is the most common
+    # reason a startup scan "finds no documents".
+    document_count = _count_supported_documents(watch_path)
+    log_info(f"{document_count} supported document(s) under {watch_path}", component="FolderWatcher")
+    if document_count == 0:
+        log_warn(
+            f"No supported documents in {watch_path}.\n"
+            "In Docker, check the volume mount: -v ./my-docs:/app/my-docs:ro\n"
+            "Outside Docker, put files in DOCS_DIR or point DOCS_DIR at the right folder.\n"
+            f"Supported extensions: {', '.join(SUPPORTED_EXTENSIONS)}",
+            component="FolderWatcher",
+        )
+
     try:
         # ====================================================================
         # Initialization: Store callback and path in global state
@@ -344,9 +371,9 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
         _watcher_active = True
 
         # Log successful startup
-        print(f"[FolderWatcher] Started watching: {watch_path.absolute()}", file=sys.stderr)
-        print(f"[FolderWatcher] Incremental updates enabled with {debounce_seconds}s debounce", file=sys.stderr)
-        print(f"[FolderWatcher] Full scan interval: {FULL_SCAN_INTERVAL_DAYS} days", file=sys.stderr)
+        log_success(f"Started watching: {watch_path.absolute()}", component="FolderWatcher")
+        log_info(f"Incremental updates enabled with {debounce_seconds}s debounce", component="FolderWatcher")
+        log_info(f"Full scan interval: {FULL_SCAN_INTERVAL_DAYS} days", component="FolderWatcher")
 
         # ====================================================================
         # Prepare return value
@@ -375,22 +402,19 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
                 vector_store = VectorStore()
                 doc_count = vector_store.collection.count()
                 if doc_count == 0:
-                    print(f"[FolderWatcher] Database is empty - forcing initial full scan", file=sys.stderr)
+                    log_info(f"Database is empty - forcing initial full scan", component="FolderWatcher")
                     should_scan = True
                 else:
-                    print(f"[FolderWatcher] Database has {doc_count} chunks - skipping initial scan", file=sys.stderr)
+                    log_info(f"Database has {doc_count} chunks - skipping initial scan", component="FolderWatcher")
             except Exception as e:
                 from .errors import explain
-                print(
-                    "[FolderWatcher] Warning: could not check whether the index is empty. "
-                    "The initial scan follows FULL_SCAN_ON_BOOT instead.",
-                    file=sys.stderr
-                )
-                print(explain(e, context="folder watcher database check"), file=sys.stderr)
+                log_warn("Could not check whether the index is empty. "
+                    "The initial scan follows FULL_SCAN_ON_BOOT instead.", component="FolderWatcher")
+                log_info(explain(e, context="folder watcher database check"), component="FolderWatcher")
         
         # Perform the scan if needed
         if should_scan:
-            print(f"[FolderWatcher] Performing initial full scan...", file=sys.stderr)
+            log_info(f"Performing initial full scan...", component="FolderWatcher")
             scan_result = _trigger_full_scan_impl(scan_callback)
             # Include scan results in return value for MCP response
             if scan_result:
@@ -462,7 +486,7 @@ def stop_watching_folder():
         _callback_function = None
         _watch_path = None
 
-        print("[FolderWatcher] Stopped watching folder", file=sys.stderr)
+        log_success("Stopped watching folder", component="FolderWatcher")
 
         return {
             "status": "stopped",
@@ -735,9 +759,10 @@ def _get_watch_path(folder_path: Optional[str] = None) -> Path:
     if folder_path:
         return Path(folder_path)
 
-    # Default to my-docs directory relative to BASE_DIR
-    # BASE_DIR is typically /app in Docker or project root in development
-    return BASE_DIR / "my-docs"
+    # Default to the configured documents folder: DOCS_DIR from the environment,
+    # .env, or the Docker compose file, and otherwise <project_root>/my-docs
+    # (/app/my-docs in Docker).
+    return Path(DOCS_DIR)
 
 
 # ============================================================================
@@ -767,12 +792,12 @@ if __name__ == "__main__":
             incremental: True for incremental, False for full scan
         """
         if incremental:
-            print(f"[FolderWatcher] Processing {len(changes)} incremental changes", file=sys.stderr)
+            log_info(f"Processing {len(changes)} incremental changes", component="FolderWatcher")
             for action, filepath in changes:
-                print(f"[FolderWatcher]   {action}: {filepath}", file=sys.stderr)
+                log_info(f"{action}: {filepath}", component="FolderWatcher")
                 pass
         else:
-            print("[FolderWatcher] Performing full scan", file=sys.stderr)
+            log_info("Performing full scan", component="FolderWatcher")
             pass
 
         # Trigger full scan script (for backward compatibility)
@@ -785,22 +810,22 @@ if __name__ == "__main__":
                 check=True,
                 timeout=600  # 10 minute timeout
             )
-            print(f"[FolderWatcher] Scan output: {result.stdout}", file=sys.stderr)
+            log_info(f"Scan output: {result.stdout}", component="FolderWatcher")
             if result.stderr:
-                print(f"[FolderWatcher] Scan errors: {result.stderr}", file=sys.stderr)
+                log_info(f"Scan errors: {result.stderr}", component="FolderWatcher")
                 pass
         except subprocess.TimeoutExpired:
-            print("[FolderWatcher] Scan timed out", file=sys.stderr)
+            log_error("Scan timed out", component="FolderWatcher")
             pass
         except Exception as e:
-            print(f"[FolderWatcher] Error running scan: {e}", file=sys.stderr)
+            log_error(f"Scan failed: {e}", component="FolderWatcher")
             pass
 
     # ========================================================================
     # Parse command line arguments
     # ========================================================================
     if len(sys.argv) < 2:
-        print("Usage: python folder_watcher.py <folder_path>", file=sys.stderr)
+        log_info("Usage: python folder_watcher.py <folder_path>", component="FolderWatcher")
         sys.exit(1)
 
     folder_to_watch = sys.argv[1]
@@ -811,11 +836,11 @@ if __name__ == "__main__":
     result = start_watching_folder(simple_callback, folder_path=folder_to_watch)
 
     if result["status"] != "started":
-        print(f"Error: {result['message']}", file=sys.stderr)
+        log_error(f"{result['message']}", component="FolderWatcher")
         sys.exit(1)
 
-    print(f"Watching folder: {result['watch_path']}", file=sys.stderr)
-    print("Press Ctrl+C to stop watching\n", file=sys.stderr)
+    log_info(f"Watching folder: {result['watch_path']}", component="FolderWatcher")
+    log_info("Press Ctrl+C to stop watching", component="FolderWatcher")
 
     # ========================================================================
     # Main loop: Check for scheduled full scans every minute
@@ -829,6 +854,6 @@ if __name__ == "__main__":
         # ====================================================================
         # Graceful shutdown on Ctrl+C
         # ====================================================================
-        print("\n[FolderWatcher] Stopping...", file=sys.stderr)
+        log_info("Stopping the folder watcher...", component="FolderWatcher")
         stop_watching_folder()
-        print("[FolderWatcher] Stopped", file=sys.stderr)
+        log_info("Stopped", component="FolderWatcher")

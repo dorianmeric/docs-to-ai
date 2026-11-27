@@ -5,6 +5,7 @@ This module contains all the tool function definitions that are exposed
 via the MCP protocol.
 """
 
+from .logging_utils import log_error
 import time
 import sys
 from typing import Optional
@@ -12,6 +13,7 @@ from typing import Optional
 from app.errors import explain, format_message, friendly_errors
 from app.vector_store import VectorStore
 from app.config import (
+    DOCS_DIR as CONFIGURED_DOCS_DIR,
     DEFAULT_SEARCH_RESULTS,
     MAX_SEARCH_RESULTS,
     CHROMA_SPACE,
@@ -28,9 +30,12 @@ from app.folder_watcher import (
 )
 from app.incremental_updater import process_incremental_changes
 from app.scan_all_my_documents import scan_all
+from app.scan_scheduler import is_scan_in_progress
 
 
-DOCS_DIR = "/app/my-docs"
+# The tools must use the same folder the rest of the app uses, including a
+# DOCS_DIR override from the environment, .env, or the Docker compose file.
+DOCS_DIR = str(CONFIGURED_DOCS_DIR)
 
 
 def _format_file_size(size_in_bytes: int) -> str:
@@ -300,6 +305,14 @@ def get_collection_stats() -> str:
 @friendly_errors
 def scan_all_my_documents() -> str:
     """Scan all documents in the docs directory and update the vector database."""
+    # A second scan would reset the index while the first one is still writing
+    if is_scan_in_progress():
+        return format_message(
+            "A scan is already running, so this request was not started.",
+            cause="The startup scan or a previous request is still indexing documents.",
+            fix="Wait for the running scan to finish (the container log shows progress), then ask again.",
+        )
+
     try:
         result = scan_all(DOCS_DIR)
 
@@ -321,7 +334,7 @@ def start_watching_folder() -> str:
                 else:
                     return scan_all(DOCS_DIR)
             except Exception as e:
-                print(f"[MCP] Error during scan: {e}", file=sys.stderr)
+                log_error(f"Scan failed: {e}", component="MCP")
                 return explain(e, context="folder watcher scan")
 
         result = start_folder_watcher(scan_callback, do_initial_scan=True)

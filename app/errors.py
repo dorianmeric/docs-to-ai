@@ -10,9 +10,9 @@ and startup failures. Use :class:`DocsToAIError` when you already know the cause
 and the fix.
 """
 
+from .logging_utils import log_error
 import errno
 import functools
-import sys
 from typing import Optional
 
 TROUBLESHOOTING = "See 'Troubleshooting: error messages' in README.md."
@@ -269,4 +269,4 @@ def friendly_errors(func):
 
 def warn(exc: BaseException, context: Optional[str] = None) -> None:
     """Print a friendly message on stderr (used for non-fatal failures)."""
-    print(explain(exc, context=context), file=sys.stderr)
+    log_error(explain(exc, context=context), component="Error")

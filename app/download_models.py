@@ -1,6 +1,7 @@
 # app/download_models.py
 from sentence_transformers import SentenceTransformer, CrossEncoder
-from .errors import DocsToAIError, explain
+from .errors import explain
+from .logging_utils import log_error, log_info, log_success, log_warn
 from .config import (
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSION,
@@ -19,14 +20,14 @@ def download_tokenizer():
     tiktoken fetches its BPE data on first use, which would otherwise need
     network access at ingest time inside the container.
     """
-    print(f"Caching tokenizer: {TOKENIZER_MODEL}", file=sys.stderr)
+    log_info(f"Caching tokenizer: {TOKENIZER_MODEL}", component="Download")
     try:
         import tiktoken
         tiktoken.get_encoding(TOKENIZER_MODEL)
-        print(f"Successfully cached {TOKENIZER_MODEL}", file=sys.stderr)
+        log_success(f"Successfully cached {TOKENIZER_MODEL}", component="Download")
     except Exception as e:
         # Chunking falls back to an estimate, so this is not fatal
-        print(explain(e, context="tokenizer download"), file=sys.stderr)
+        log_warn(explain(e, context="tokenizer download"), component="Download")
 
 
 def download_models():
@@ -35,43 +36,44 @@ def download_models():
     This script is intended to be run during the Docker build process
     to pre-warm the cache and bake the models into the image.
     """
-    print("Downloading and caching embedding model...", file=sys.stderr)
+    log_info("Downloading and caching embedding model...", component="Download")
     try:
         model = SentenceTransformer(EMBEDDING_MODEL)
         get_dim = getattr(model, 'get_embedding_dimension', None) or model.get_sentence_embedding_dimension
         actual_dim = int(get_dim())
-        print(f"Successfully cached {EMBEDDING_MODEL} ({actual_dim}-dim)", file=sys.stderr)
+        log_success(f"Successfully cached {EMBEDDING_MODEL} ({actual_dim}-dim)", component="Download")
         if actual_dim != EMBEDDING_DIMENSION:
-            print(
-                f"WARNING: EMBEDDING_DIMENSION={EMBEDDING_DIMENSION} does not match "
+            log_warn(
+                f"EMBEDDING_DIMENSION={EMBEDDING_DIMENSION} does not match "
                 f"{EMBEDDING_MODEL} ({actual_dim}-dim). Set EMBEDDING_DIMENSION={actual_dim} "
-                "(the model's real size is used at runtime, but the mismatch forces a re-scan).",
-                file=sys.stderr
+                "(the model's real size is used at runtime).",
+                component="Download",
             )
     except Exception as e:
-        print(explain(e, context="embedding model download"), file=sys.stderr)
-        print(
+        log_error(explain(e, context="embedding model download"), component="Download")
+        log_error(
             "Fix: check the model name in EMBEDDING_MODEL and the network connection, then run "
             "'python -m app.download_models' again.",
-            file=sys.stderr
+            component="Download",
         )
         sys.exit(1)
 
     if EMBEDDING_QUERY_PROMPT:
-        print("Using custom EMBEDDING_QUERY_PROMPT for search queries", file=sys.stderr)
+        log_info("Using custom EMBEDDING_QUERY_PROMPT for search queries", component="Download")
 
     download_tokenizer()
 
     if USE_RERANKER:
-        print("Downloading and caching re-ranker model...", file=sys.stderr)
+        log_info("Downloading and caching re-ranker model...", component="Download")
         try:
             CrossEncoder(RERANKER_MODEL)
-            print(f"Successfully cached {RERANKER_MODEL}", file=sys.stderr)
+            log_success(f"Successfully cached {RERANKER_MODEL}", component="Download")
         except Exception as e:
-            print(explain(e, context="re-ranker download"), file=sys.stderr)
-            print(
-                "Fix: retry with network access, or set USE_RERANKER=False to run without re-ranking.",
-                file=sys.stderr
+            log_warn(explain(e, context="re-ranker download"), component="Download")
+            log_warn(
+                "Re-ranking stays off until the model is available. Retry with network access, or set "
+                "USE_RERANKER=False to run without re-ranking.",
+                component="Download",
             )
             # Not fatal: re-ranking is optional
 

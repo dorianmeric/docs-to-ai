@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Tuple
 from .document_processor import DocumentProcessor
 from .vector_store import VectorStore
+from .logging_utils import log_info
 from .config import TOPIC_SEPARATOR
 from .errors import explain, format_inline
 import time
@@ -273,5 +274,5 @@ def process_incremental_changes(changes: List[Tuple[str, str]], doc_dir: str):
 if __name__ == "__main__":
     pass
     # Test the incremental updater
-    print("This module is designed to be used by folder_watcher.py", file=sys.stderr)
-    print("It processes incremental file changes (add, update, delete)", file=sys.stderr)
+    log_info("This module is designed to be used by folder_watcher.py", component="IncrementalUpdater")
+    log_info("It processes incremental file changes (add, update, delete)", component="IncrementalUpdater")

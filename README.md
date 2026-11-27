@@ -26,6 +26,7 @@ Supported extensions: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb
   - [Example `.env`](#example-env)
 - [Retrieval pipeline](#retrieval-pipeline)
 - [Production RAG settings](#production-rag-settings)
+- [Logs](#logs)
 - [Troubleshooting: error messages](#troubleshooting-error-messages)
 - [FAQ: search files and PDFs locally](#faq-search-files-and-pdfs-locally)
 - [License](#license)
@@ -197,8 +198,8 @@ services:
     container_name: docs-to-ai
 
     volumes:
-      - ./cache/chromadb:/app/chromadb        # vector store
-      - ./cache/doc_cache:/app/doc_cache      # extracted text
+      - ./cache/chromadb:/app/cache/chromadb  # vector store
+      - ./cache/doc_cache:/app/cache/doc_cache  # extracted text
       - ./my-docs:/app/my-docs:ro             # your documents, read-only
 
     # stdio MCP needs stdin/stdout
@@ -230,7 +231,16 @@ Claude Desktop config for the container:
 }
 ```
 
-Put your documents in `./my-docs`, then ask the LLM to run `scan_all_my_documents`. Ask the LLM to run `start_watching_folder` to keep the index fresh.
+Put your documents in `./my-docs` on the host. The container sees that folder at `/app/my-docs`. Ask the LLM to run `scan_all_my_documents`, or wait for the startup scan. Ask the LLM to run `start_watching_folder` to keep the index fresh.
+
+Check the mount before the first scan. `docker compose ls` shows the project directory, and `docker compose config` shows the host path behind `./my-docs`.
+
+```bash
+docker exec docs-to-ai ls /app/my-docs     # must list your files
+docker logs -f docs-to-ai                 # shows the scan progress
+```
+
+A different folder on the host needs both a mount and `DOCS_DIR`. Example: `- ./contracts:/app/contracts:ro` plus `DOCS_DIR=/app/contracts`.
 
 ### Docker volumes, ports, and env
 
@@ -461,7 +471,51 @@ Raise `EMBEDDING_BATCH_SIZE` to 64 or 128 on a GPU. Keep the default 32 on CPU.
 
 On CPU, re-ranking 50 candidates costs about 1.8 s per search. Lower `RERANKER_TOP_N` when a search feels slow on CPU.
 
-Docker on Linux installs the CUDA-enabled PyPI wheel. Uncomment the `deploy.resources.reservations.devices` block in [docker-compose.yml](docker-compose.yml) to pass GPUs to the container. The host needs the NVIDIA Container Toolkit. `docker run --gpus all ...` works too.
+### GPU inside Docker
+
+A container only sees the GPUs that Docker passes to it. Without a device reservation the log says `No GPU is visible inside this container`, even when the host has a GPU.
+
+Docker cannot make the reservation optional in one file: a host without a GPU fails `docker compose up`. Use the override file on GPU hosts instead.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+To keep plain `docker compose up -d`, add one line to `.env`. The separator is `;` on Windows and `:` on Linux/macOS.
+
+```bash
+COMPOSE_FILE=docker-compose.yml;docker-compose.gpu.yml      # Windows
+COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml      # Linux/macOS
+```
+
+`[docker-compose.gpu.yml](docker-compose.gpu.yml)` only adds the device reservation:
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all          # or device_ids: ['0'] to pin one GPU
+          capabilities: [gpu]
+```
+
+Requirements:
+
+- NVIDIA driver on the host. Windows: the normal GeForce driver is enough.
+- Linux hosts: the NVIDIA Container Toolkit (`nvidia-container-toolkit`).
+- Docker Desktop: the WSL2 based engine, which is the default. Do not switch to Hyper-V.
+
+Check the container sees the GPU:
+
+```bash
+docker run --rm --gpus all mcp/docs-to-ai nvidia-smi
+docker compose logs | grep "Compute device"
+```
+
+Expected log line: `Compute device: cuda:0 (NVIDIA GeForce RTX 5090, 32 GB VRAM)`. The image installs the CUDA-enabled PyTorch wheel on Linux, so no rebuild is needed.
+
+Plain `docker run` needs `--gpus all`. Add it yourself, otherwise the container starts on CPU.
 
 ### Topics
 
@@ -546,6 +600,27 @@ The settings below come from 2026 production RAG research. The marked settings a
 
 Not adopted: contextual retrieval and late chunking. Contextual retrieval runs about 120× slower at indexing. Neither gain is proven on small local corpora. Late chunking can hurt short passages.
 
+## Logs
+
+Every line the server writes to stderr starts with a timestamp, a level, and an emoji. Docker shows these lines in `docker logs`, so a slow scan or a failed file is easy to spot.
+
+```
+2026-11-27 20:45:12 INFO    [VectorStore] Loading re-ranker model: cross-encoder/ms-marco-MiniLM-L-6-v2 on cpu
+2026-11-27 20:45:14 SUCCESS ✅ [FolderWatcher] Started watching: /app/my-docs
+2026-11-27 20:45:14 INFO    [FolderWatcher] 9 supported document(s) under /app/my-docs
+2026-11-27 20:45:15 WARN    ⚠️ [FolderWatcher] No supported documents in /app/my-docs.
+2026-11-27 20:45:16 ERROR   ❌ [VectorStore] The vector database at /app/cache/chromadb could not be opened.
+```
+
+- `INFO` records normal progress. No emoji.
+- `SUCCESS ✅` records something that worked: model loaded, folder watched, chunks added.
+- `WARN ⚠️` records a fallback or a partial problem. The work continues.
+- `ERROR ❌` records a failure. The message carries `Problem`, `Cause`, and `Fix` lines.
+
+Multi-line messages (scan reports, error explanations) are indented under their first line. `grep ERROR` finds the whole block by its first line.
+
+stdout stays clean. stdout carries the MCP protocol and the CLI reports (`--help`, `--show-config`, scan reports). Log lines never go to stdout, so they cannot corrupt the MCP stream.
+
 ## Troubleshooting: error messages
 
 The server explains each failure in three parts: what happened, the likely cause, and the fix. The list below covers the messages users hit most.
@@ -553,6 +628,9 @@ The server explains each failure in three parts: what happened, the likely cause
 | Message you see | Cause | Fix |
 |---|---|---|
 | `The documents folder '<path>' does not exist.` | `DOCS_DIR` points at the wrong folder, or the folder is missing. | Create the folder. Set `DOCS_DIR` to it, or pass `--doc-dir <path>` to the scan. |
+| `No supported documents were found in '/app/my-docs'.` or `0 supported document(s) under /app/my-docs` | The container sees an empty documents folder. The bind mount points at a different host folder, `docker compose` ran from another directory, or `DOCS_DIR` is wrong. | Run `docker compose config` and check the host side of `./my-docs:/app/my-docs:ro`. Run `docker exec docs-to-ai ls /app/my-docs` and compare. Move the files into the mounted host folder, then scan again. |
+| The index is empty again after every container restart, and the first scan repeats each time | The cache volumes point at the wrong container paths, so the index is written inside the container and thrown away. | Mount `/app/cache/chromadb` and `/app/cache/doc_cache`, as in [docker-compose.yml](docker-compose.yml). Paths like `/app/chromadb` do not match what the app reads. |
+| The LLM gets no answer while the first scan runs | The first scan embeds every chunk on CPU and holds the server until it finishes. A 500-chunk corpus takes several minutes. | Follow the progress with `docker logs -f docs-to-ai`. Use a GPU for a 37× faster first scan, or set `CHUNKING_STRATEGY=by_paragraph` to skip the extra sentence embeddings. |
 | `The path '<path>' is a file, not a folder.` | `DOCS_DIR` points at one document. | Move the documents into a folder and point `DOCS_DIR` at that folder. |
 | `No supported documents were found in '<path>'.` | The folder is empty, or the files have unreadable extensions. | Add PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, or CSV files, then scan again. |
 | `The index is empty, so '<query>' could not match anything.` | Nothing is indexed yet, or the last scan failed. | Run the `scan_all_my_documents` tool, or `python -m app.scan_all_my_documents --doc-dir ./my-docs`. |
@@ -573,6 +651,8 @@ The server explains each failure in three parts: what happened, the likely cause
 | `The folder watcher could not start for '<path>'.` | The folder is missing or unreadable, or `watchdog` is not installed. | Create the folder and check `DOCS_DIR`. Run `uv sync`. Then call `start_watching_folder` again. |
 | `Cached text for '<file>' is unreadable.` | A cache entry was truncated, for example by a crash. | No action needed. The scan re-extracts the file and rewrites the cache entry. |
 | `Compute device: cpu (no GPU detected)` in the log | PyTorch has no CUDA device: CPU-only wheel, or no driver. | Install a CUDA wheel: `uv pip install --index-url https://download.pytorch.org/whl/cu128 torch`. |
+| `No GPU is visible inside this container` in the log | Docker started the container without the GPU device reservation, so `/dev/nvidia*` does not exist inside it. | Add the override: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`. Or set `COMPOSE_FILE` in `.env` (`;` between files on Windows, `:` on Linux/macOS). Or add `--gpus all` to `docker run`. |
+| `docker compose up` fails with `could not select device driver "" with capabilities: [[gpu]]` | The host has no NVIDIA driver, no NVIDIA Container Toolkit, or Docker Desktop uses the Hyper-V backend. | Install the NVIDIA driver and (on Linux) the NVIDIA Container Toolkit. On Docker Desktop, enable the WSL2 based engine. Then retry. |
 | `Error calling tool '<name>': maximum recursion depth exceeded` | An older build registered each MCP tool under the same name it imported, so the tool called itself. The current source imports the implementations under private names. | Rebuild the container with the current source: `docker compose build --no-cache`. |
 | `[FolderWatcher] Warning: Could not check database state: name 'VectorStore' is not defined` | Older build: the watcher used the vector store without importing it, so the empty-index check failed. The watcher still ran; the initial scan followed `FULL_SCAN_ON_BOOT`. | Rebuild the container with the current source. |
 

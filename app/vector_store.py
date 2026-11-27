@@ -1,3 +1,4 @@
+from .logging_utils import log_info, log_success, log_warn
 import chromadb
 from chromadb.config import Settings
 from chromadb.types import Metadata
@@ -86,10 +87,7 @@ class VectorStore:
         self.cross_encoder = None
         if USE_RERANKER:
             device = resolve_device()
-            print(
-                f"Loading re-ranker model: {RERANKER_MODEL} on {describe_device(device)}",
-                file=sys.stderr
-            )
+            log_info(f"Loading re-ranker model: {RERANKER_MODEL} on {describe_device(device)}", component="VectorStore")
             try:
                 self.cross_encoder = CrossEncoder(RERANKER_MODEL, device=device)
             except Exception as exc:
@@ -101,7 +99,7 @@ class VectorStore:
                         "entirely, set USE_RERANKER=False.",
                     details=f"{type(exc).__name__}: {exc}",
                 ) from exc
-            print("Re-ranker is active.", file=sys.stderr)
+            log_success("Re-ranker is active.", component="VectorStore")
 
         # The collection's dimension decides compatibility, so trust the model over
         # a stale EMBEDDING_DIMENSION (e.g. left over from all-MiniLM-L6-v2)
@@ -129,15 +127,12 @@ class VectorStore:
             ) from exc
 
         if self.bm25 is not None:
-            print("Hybrid search is active (BM25 + dense, fused with RRF)", file=sys.stderr)
+            log_success("Hybrid search is active (BM25 + dense, fused with RRF)", component="VectorStore")
 
-        print(f"Vector store initialized. Documents chunks in collection: {self.collection.count()}", file=sys.stderr)
+        log_success(f"Vector store initialized. Documents chunks in collection: {self.collection.count()}", component="VectorStore")
 
-        print(
-            f"Search pipeline: {'dense + BM25/RRF' if self.bm25 is not None else 'dense'}"
-            f"{', cross-encoder re-ranking' if self.cross_encoder else ''}",
-            file=sys.stderr
-        )
+        log_info(f"Search pipeline: {'dense + BM25/RRF' if self.bm25 is not None else 'dense'}"
+            f"{', cross-encoder re-ranking' if self.cross_encoder else ''}", component="VectorStore")
 
         # Mark as initialized
         VectorStore._initialized = True
@@ -148,12 +143,9 @@ class VectorStore:
         if actual is None:
             return EMBEDDING_DIMENSION
         if actual != EMBEDDING_DIMENSION:
-            print(
-                f"[VectorStore] EMBEDDING_DIMENSION={EMBEDDING_DIMENSION} does not match "
+            log_warn(f"EMBEDDING_DIMENSION={EMBEDDING_DIMENSION} does not match "
                 f"{EMBEDDING_MODEL} ({actual}-dim); using {actual}. "
-                "Update EMBEDDING_DIMENSION to silence this warning.",
-                file=sys.stderr
-            )
+                "Update EMBEDDING_DIMENSION to silence this warning.", component="VectorStore")
         return actual
 
     def _hnsw_configuration(self) -> Dict[str, Any]:
@@ -189,21 +181,15 @@ class VectorStore:
 
         mismatch = self._describe_mismatch(collection)
         if mismatch:
-            print(
-                f"[VectorStore] {mismatch}. Recreating collection '{CHROMA_COLLECTION_NAME}' "
-                f"from scratch - re-scan your documents to rebuild the index.",
-                file=sys.stderr
-            )
+            log_warn(f"{mismatch}. Recreating collection '{CHROMA_COLLECTION_NAME}' "
+                f"from scratch - re-scan your documents to rebuild the index.", component="VectorStore")
             recreated = True
             try:
                 self.client.delete_collection(CHROMA_COLLECTION_NAME)
             except Exception as e:
                 recreated = False
-                print(
-                    f"[VectorStore] Warning: could not delete collection: {e}. Keeping it as-is; "
-                    f"delete {CHROMADB_DIR} manually and re-scan to rebuild the index.",
-                    file=sys.stderr
-                )
+                log_warn(f"Could not delete the collection: {e}. Keeping it as-is; "
+                    f"delete {CHROMADB_DIR} manually and re-scan to rebuild the index.", component="VectorStore")
             if recreated:
                 collection = self.client.create_collection(
                     name=CHROMA_COLLECTION_NAME,
@@ -242,9 +228,9 @@ class VectorStore:
             return
         try:
             collection.modify(configuration={"hnsw": {"ef_search": HNSW_EF_SEARCH}})
-            print(f"[VectorStore] Set HNSW ef_search={HNSW_EF_SEARCH}", file=sys.stderr)
+            log_info(f"Set HNSW ef_search={HNSW_EF_SEARCH}", component="VectorStore")
         except Exception as e:
-            print(f"[VectorStore] Warning: could not update HNSW ef_search: {e}", file=sys.stderr)
+            log_warn(f"Could not update HNSW ef_search: {e}", component="VectorStore")
     
     def add_documents(self, chunks: List[Dict[str, Any]]) -> int:
         """
@@ -276,7 +262,7 @@ class VectorStore:
             metadatas.append(metadata)
         
         # Generate embeddings
-        print(f"Generating embeddings for {len(texts)} chunks...", file=sys.stderr)
+        log_info(f"Generating embeddings for {len(texts)} chunks...", component="VectorStore")
         embeddings = encode_passages(texts, show_progress_bar=True)
         
         # Add to collection (using upsert to prevent duplicates)
@@ -304,7 +290,7 @@ class VectorStore:
                 self.bm25.add(ids, texts)
             self._bm25_generation += 1
         
-        print(f"Added {len(chunks)} chunks to vector store", file=sys.stderr)
+        log_success(f"Added {len(chunks)} chunks to vector store", component="VectorStore")
         return len(chunks)
 
     def _invalidate_bm25(self) -> None:
@@ -323,7 +309,7 @@ class VectorStore:
         try:
             data = self.collection.get(include=['documents'])
         except Exception as e:
-            print(f"[VectorStore] Could not build BM25 index: {e}", file=sys.stderr)
+            log_warn(f"Could not build BM25 index: {e}", component="VectorStore")
             return
 
         ids = data.get('ids') or []
@@ -332,7 +318,7 @@ class VectorStore:
         if generation == self._bm25_generation:
             self._bm25_ready = True
         if ids:
-            print(f"[VectorStore] BM25 index built over {len(ids)} chunks", file=sys.stderr)
+            log_success(f"BM25 index built over {len(ids)} chunks", component="VectorStore")
 
     def _dense_search(self, query: str, n_results: int) -> List[Dict]:
         """Vector search over the ChromaDB collection (cosine distance)."""
@@ -383,7 +369,7 @@ class VectorStore:
                 ids=list(chunk_ids), include=['documents', 'metadatas']
             )
         except Exception as e:
-            print(f"[VectorStore] Could not fetch BM25-only candidates: {e}", file=sys.stderr)
+            log_warn(f"Could not fetch BM25-only candidates: {e}", component="VectorStore")
             return fetched
 
         ids = data.get('ids') or []
@@ -521,7 +507,7 @@ class VectorStore:
                 pass
         
         if self.cross_encoder and formatted_results:
-            print(f"Re-ranking top {len(formatted_results)} results...", file=sys.stderr)
+            log_info(f"Re-ranking top {len(formatted_results)} results...", component="VectorStore")
             
             pairs = [[query, result['text']] for result in formatted_results]
             
@@ -674,7 +660,7 @@ class VectorStore:
         if ids_to_delete:
             self.collection.delete(ids=ids_to_delete)
             self._invalidate_bm25()
-            print(f"Deleted {len(ids_to_delete)} chunks from {filepath}", file=sys.stderr)
+            log_success(f"Deleted {len(ids_to_delete)} chunks from {filepath}", component="VectorStore")
         
         return len(ids_to_delete)
     
@@ -707,7 +693,7 @@ class VectorStore:
         if ids_to_delete:
             self.collection.delete(ids=ids_to_delete)
             self._invalidate_bm25()
-            print(f"Deleted {len(ids_to_delete)} chunks from topic '{topic}'", file=sys.stderr)
+            log_success(f"Deleted {len(ids_to_delete)} chunks from topic '{topic}'", component="VectorStore")
         
         return len(ids_to_delete)
     
@@ -720,7 +706,7 @@ class VectorStore:
             metadata=self._collection_metadata(),
         )
         self._invalidate_bm25()
-        print("Vector store reset", file=sys.stderr)
+        log_success("Vector store reset", component="VectorStore")
 
 
 if __name__ == "__main__":
@@ -729,15 +715,15 @@ if __name__ == "__main__":
     
     # Print stats
     stats = store.get_stats()
-    print(f"\nVector Store Stats:", file=sys.stderr)
-    print(f"Total chunks: {stats['total_chunks']}", file=sys.stderr)
-    print(f"Total documents: {stats['total_documents']}", file=sys.stderr)
-    print(f"Total topics: {stats['total_topics']}", file=sys.stderr)
-    print(f"Documents: {stats['documents']}", file=sys.stderr)
+    log_info("Vector Store Stats:", component="VectorStore")
+    log_info(f"Total chunks: {stats['total_chunks']}", component="VectorStore")
+    log_info(f"Total documents: {stats['total_documents']}", component="VectorStore")
+    log_info(f"Total topics: {stats['total_topics']}", component="VectorStore")
+    log_info(f"Documents: {stats['documents']}", component="VectorStore")
     
     # Test search
     results = []
     if stats['total_chunks'] > 0:
         results = store.search("test query", n_results=3)
-    print(f"\nTest search returned {len(results)} results", file=sys.stderr)
+    log_info(f"Test search returned {len(results)} results", component="VectorStore")
 

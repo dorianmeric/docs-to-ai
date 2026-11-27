@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
+from .logging_utils import log_error
 from .config import (
     FULL_SCAN_INTERVAL_DAYS,
     BASE_DIR,
@@ -37,7 +38,7 @@ def _load_scan_state():
                 _last_scan_time = state.get('last_scan_time')
                 _last_full_scan_time = state.get('last_full_scan_time')
     except Exception as e:
-        print(f"[ScanScheduler] Error loading scan state: {e}", flush=True)
+        log_error(f"Could not load the scan state: {e}", component="ScanScheduler")
 
 
 def _save_scan_state():
@@ -53,7 +54,7 @@ def _save_scan_state():
         with open(_scan_state_file, 'w') as f:
             json.dump(state, f)
     except Exception as e:
-        print(f"[ScanScheduler] Error saving scan state: {e}", flush=True)
+        log_error(f"Could not save the scan state: {e}", component="ScanScheduler")
 
 
 def _check_full_scan_needed() -> bool:
@@ -73,26 +74,40 @@ def _check_full_scan_needed() -> bool:
     return days_since >= FULL_SCAN_INTERVAL_DAYS
 
 
+def is_scan_in_progress() -> bool:
+    """True while a full scan is running (startup scan or watcher scan)."""
+    with _scan_in_progress_lock:
+        return _scan_in_progress
+
+
 def _trigger_full_scan(callback: Callable):
     """Trigger a full scan using the provided callback.
     
     Args:
         callback: Function to call for full scan (receives empty changes list)
+
+    Returns:
+        The callback's return value (usually the scan report), or a message when
+        the scan could not run. The startup path prints this, so a scan that
+        finds nothing is visible in the log instead of silent.
     """
     global _last_full_scan_time, _scan_in_progress
     
     with _scan_in_progress_lock:
         if _scan_in_progress:
-            return
+            return "A full scan is already running, so this one was skipped."
         _scan_in_progress = True
     
     _last_full_scan_time = time.time()
     _save_scan_state()
     
     try:
-        callback([], incremental=False)
+        return callback([], incremental=False)
     except Exception as e:
-        print(f"[ScanScheduler] Error during full scan: {e}", flush=True)
+        from .errors import explain
+        message = explain(e, context="initial full scan")
+        log_error(message, component="ScanScheduler")
+        return message
     finally:
         with _scan_in_progress_lock:
             _scan_in_progress = False

@@ -2,9 +2,9 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 import hashlib
 import json
-import sys
 import re
 
+from .logging_utils import log_info, log_warn
 from .config import (
     CHUNK_SIZE, CHUNK_OVERLAP, DOC_CACHE_DIR, USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC, 
     CHUNKING_STRATEGY, CHUNK_BY_TOKEN, TOKENIZER_MODEL, PRESERVE_HEADINGS, 
@@ -57,14 +57,11 @@ def _get_encoding():
     except Exception as e:
         _ENCODING_FAILURES += 1
         if _ENCODING_FAILURES >= _ENCODING_MAX_FAILURES:
-            print(
-                f"WARNING: tokenizer '{TOKENIZER_MODEL}' could not be loaded after "
+            log_warn(f"Tokenizer '{TOKENIZER_MODEL}' could not be loaded after "
                 f"{_ENCODING_FAILURES} attempts ({e}). Token counts are now estimated "
                 f"at {CHARS_PER_TOKEN} characters per token; run "
                 "'python -m app.download_models' (or mount TIKTOKEN_CACHE_DIR) to "
-                "cache the tokenizer data.",
-                file=sys.stderr
-            )
+                "cache the tokenizer data.", component="Chunker")
         return None
     _ENCODING_FAILURES = 0
     return _ENCODINGS[TOKENIZER_MODEL]
@@ -174,10 +171,10 @@ class DocumentProcessor:
                 return cached_data
             except (json.JSONDecodeError, OSError, KeyError) as exc:
                 # A damaged cache entry must not stop the scan: drop it and re-extract
-                print(
+                log_warn(
                     f"Cached text for '{doc_file.name}' is unreadable ({type(exc).__name__}). "
-                    "Fix: nothing to do, the file is being re-extracted and the cache rewritten.",
-                    file=sys.stderr
+                    "The file is re-extracted and the cache rewritten.",
+                    component="Chunker",
                 )
                 cache_file.unlink(missing_ok=True)
 
@@ -201,12 +198,13 @@ class DocumentProcessor:
         elif extension == '.csv':
             pages_data = extract_text_from_csv(doc_file)
         else:
-            print(f"Unsupported file type: {extension}", file=sys.stderr)
+            log_warn(f"Unsupported file type '{extension}'; skipping the file", component="Chunker")
             return []
 
-
-        print(f"\n⚠ File: {doc_file}, Found file_size = {file_size} bytes, last_modified = {last_modified} (after caching check)", file=sys.stderr)
-
+        log_info(
+            f"Extracting {doc_file.name} ({file_size} bytes, modified {last_modified})",
+            component="Chunker",
+        )
         # Add metadata to each page
         result = []
         for page_data in pages_data:
@@ -441,7 +439,7 @@ class DocumentProcessor:
             threshold = float(np.percentile(distances, SEMANTIC_CHUNK_PERCENTILE))
             split_indices = {i + 1 for i, dist in enumerate(distances) if dist > threshold}
         except Exception as e:
-            print(f"Semantic chunking unavailable ({e}); falling back to paragraph chunking", file=sys.stderr)
+            log_warn(f"Semantic chunking unavailable ({e}); falling back to paragraph chunking", component="Chunker")
             return self._chunk_by_paragraph(text, metadata, page_num)
 
         # Group sentences into chunks, respecting the split boundaries and size bounds
@@ -620,7 +618,7 @@ class DocumentProcessor:
                     item.unlink()
                 elif item.is_dir():
                     shutil.rmtree(item)
-            print("Document cache cleared (contents deleted, folder preserved)", file=sys.stderr)
+            log_info("Document cache cleared (contents deleted, folder preserved)", component="Chunker")
     
     def _get_cache_path(self, doc_path: Path) -> Path:
         """Generate cache file path for a document."""
@@ -632,11 +630,8 @@ class DocumentProcessor:
         try:
             self._cache_extracted_text(doc_path, pages_data)
         except OSError as exc:
-            print(
-                f"Could not write the extracted-text cache for '{doc_path.name}'",
-                file=sys.stderr
-            )
-            print(explain(exc, context="cache write"), file=sys.stderr)
+            log_warn(f"Could not write the extracted-text cache for '{doc_path.name}'", component="Chunker")
+            log_warn(explain(exc, context="cache write"), component="Chunker")
     
     def _cache_extracted_text(self, doc_path: Path, pages_data: List[Dict]):
         """Cache extracted text to avoid reprocessing."""
@@ -653,7 +648,7 @@ if __name__ == "__main__":
     test_doc = "test.pdf"  # Replace with actual document path
     if Path(test_doc).exists():
         chunks = processor.process_document(test_doc)
-        print(f"Extracted {len(chunks)} chunks from {test_doc}", file=sys.stderr)
+        log_info(f"Extracted {len(chunks)} chunks from {test_doc}", component="Chunker")
         if chunks:
             print(f"\nFirst chunk preview:")
             print(f"Topics: {chunks[0]['metadata']['topics']}")

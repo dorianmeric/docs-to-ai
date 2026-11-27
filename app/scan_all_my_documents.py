@@ -5,6 +5,7 @@ from pathlib import Path
 # Application-specific imports for document processing and vector storage
 from .document_processor import DocumentProcessor
 from .vector_store import VectorStore
+from .logging_utils import log_error, log_info, log_warn
 from .config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
 from .errors import DocsToAIError, explain, format_inline, format_message
 import sys
@@ -316,7 +317,7 @@ def main():
     try:
         # Reset vector store if user specified the --reset flag
         if args.reset:
-            print("Resetting vector store...", file=sys.stderr)
+            log_info("Resetting the vector store...", component="Scan")
             store = VectorStore()
             store.reset()
 
@@ -327,13 +328,13 @@ def main():
         if "Problem:" in str(report):
             sys.exit(2)
     except DocsToAIError as exc:
-        print(exc.message(), file=sys.stderr)
+        log_error(exc.message(), component="Scan")
         sys.exit(1)
     except KeyboardInterrupt:
-        print("Scan interrupted. Nothing else to do: run the scan again to finish indexing.", file=sys.stderr)
+        log_warn("Scan interrupted. Run the scan again to finish indexing.", component="Scan")
         sys.exit(130)
     except Exception as exc:
-        print(explain(exc, context="scan_all_my_documents"), file=sys.stderr)
+        log_error(explain(exc, context="scan_all_my_documents"), component="Scan")
         sys.exit(1)
 
 
