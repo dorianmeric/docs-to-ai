@@ -3,114 +3,116 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # Build-time configuration. Override any of these in a .env file or the
-      # shell, e.g. CHUNKING_STRATEGY=semantic docker compose build
+      # Build-time configuration. Every arg ends with a comment: what it does and
+      # the valid options. Override any of them in a .env file or from the shell,
+      # e.g. CHUNKING_STRATEGY=by_paragraph docker compose build
       args:
-        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
-        EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
-        EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
-        USE_GPU_ACCELERATION_IF_AVAILABLE: ${USE_GPU_ACCELERATION_IF_AVAILABLE:-True}
-        GPU_DEVICE_INDEX: ${GPU_DEVICE_INDEX:-0}
-        USE_RERANKER: ${USE_RERANKER:-True}
-        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
-        CHUNKING_STRATEGY: ${CHUNKING_STRATEGY:-semantic}
-        CHUNK_SIZE: ${CHUNK_SIZE:-1024}
-        CHUNK_OVERLAP: ${CHUNK_OVERLAP:-200}
-        CHUNK_BY_TOKEN: ${CHUNK_BY_TOKEN:-True}
-        TOKENIZER_MODEL: ${TOKENIZER_MODEL:-cl100k_base}
-        PRESERVE_HEADINGS: ${PRESERVE_HEADINGS:-True}
-        MAX_HEADING_CHUNK_SIZE: ${MAX_HEADING_CHUNK_SIZE:-1024}
-        MIN_CHUNK_SIZE: ${MIN_CHUNK_SIZE:-50}
-        SEMANTIC_CHUNK_PERCENTILE: ${SEMANTIC_CHUNK_PERCENTILE:-95}
-        SEMANTIC_CHUNK_MIN_SIZE: ${SEMANTIC_CHUNK_MIN_SIZE:-64}
-        SEMANTIC_CHUNK_MAX_SIZE: ${SEMANTIC_CHUNK_MAX_SIZE:-1024}
-        SEMANTIC_CHUNK_BUFFER_SIZE: ${SEMANTIC_CHUNK_BUFFER_SIZE:-1}
-        DEFAULT_SEARCH_RESULTS: ${DEFAULT_SEARCH_RESULTS:-10}
-        MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS:-20}
-        RERANKER_TOP_N: ${RERANKER_TOP_N:-50}
-        USE_BM25: ${USE_BM25:-True}
-        BM25_WEIGHT: ${BM25_WEIGHT:-0.3}
-        BM25_K1: ${BM25_K1:-1.5}
-        BM25_B: ${BM25_B:-0.75}
-        RRF_K: ${RRF_K:-60}
-        CHROMA_SPACE: ${CHROMA_SPACE:-cosine}
-        HNSW_EF_SEARCH: ${HNSW_EF_SEARCH:-200}
-        HNSW_EF_CONSTRUCTION: ${HNSW_EF_CONSTRUCTION:-200}
-        USE_FOLDER_AS_TOPIC: ${USE_FOLDER_AS_TOPIC:-True}
-        DEFAULT_TOPIC: ${DEFAULT_TOPIC:-uncategorized}
-        CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-my-documents}
-        FULL_SCAN_ON_BOOT: ${FULL_SCAN_ON_BOOT:-False}
-        FOLDER_WATCHER_ACTIVE_ON_BOOT: ${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}
-        DEBOUNCE_SECONDS: ${DEBOUNCE_SECONDS:-10}
-        FULL_SCAN_INTERVAL_DAYS: ${FULL_SCAN_INTERVAL_DAYS:-7}
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}  # what: sentence-transformer model that embeds chunks and queries | options: any Hugging Face embedding model, e.g. Qwen/Qwen3-Embedding-0.6B, BAAI/bge-m3, all-MiniLM-L6-v2
+        EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}  # what: vector size stored in the index, must match the model; changing it rebuilds the index | options: 384 (MiniLM), 768 (bge-base), 1024 (Qwen3-0.6B, bge-m3)
+        EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}  # what: how many texts are embedded per forward pass | options: 1-128 (64-128 on a GPU, 8-32 on CPU)
+        USE_GPU_ACCELERATION_IF_AVAILABLE: ${USE_GPU_ACCELERATION_IF_AVAILABLE:-True}  # what: put the embedding model and re-ranker on a CUDA/MPS device when one is detected | options: True, False (False = always CPU)
+        GPU_DEVICE_INDEX: ${GPU_DEVICE_INDEX:-0}  # what: which CUDA GPU to use when several are visible | options: 0 to (GPU count - 1); 0 = first GPU
+        USE_RERANKER: ${USE_RERANKER:-True}  # what: re-score fused search candidates with a cross-encoder | options: True, False
+        RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}  # what: cross-encoder used for re-ranking | options: any Hugging Face cross-encoder, e.g. cross-encoder/ms-marco-MiniLM-L-6-v2, BAAI/bge-reranker-v2-m3
+        CHUNKING_STRATEGY: ${CHUNKING_STRATEGY:-semantic}  # what: how documents are split into chunks | options: semantic, by_paragraph, semantic_heading, fixed_size, by_token
+        CHUNK_SIZE: ${CHUNK_SIZE:-1024}  # what: target chunk size for the non-semantic strategies | options: integer; tokens when CHUNK_BY_TOKEN=True (512-1024 recommended), otherwise characters
+        CHUNK_OVERLAP: ${CHUNK_OVERLAP:-200}  # what: overlap between chunks in fixed_size and by_token chunking | options: 0 to CHUNK_SIZE-1, same unit as CHUNK_SIZE
+        CHUNK_BY_TOKEN: ${CHUNK_BY_TOKEN:-True}  # what: measure chunk sizes in tokens instead of characters | options: True, False
+        TOKENIZER_MODEL: ${TOKENIZER_MODEL:-cl100k_base}  # what: tiktoken encoding used to count tokens | options: cl100k_base (GPT-4/3.5), o200k_base (GPT-4o), p50k_base (GPT-2)
+        PRESERVE_HEADINGS: ${PRESERVE_HEADINGS:-True}  # what: split on headings and keep the heading with each chunk | options: True, False
+        MAX_HEADING_CHUNK_SIZE: ${MAX_HEADING_CHUNK_SIZE:-1024}  # what: sections larger than this are split further | options: integer, same unit as CHUNK_SIZE
+        MIN_CHUNK_SIZE: ${MIN_CHUNK_SIZE:-50}  # what: fragments smaller than this are dropped | options: integer, same unit as CHUNK_SIZE
+        SEMANTIC_CHUNK_PERCENTILE: ${SEMANTIC_CHUNK_PERCENTILE:-95}  # what: percentile of sentence dissimilarity that becomes a chunk cut | options: 0-100 (higher = fewer, bigger chunks; lower = more splits)
+        SEMANTIC_CHUNK_MIN_SIZE: ${SEMANTIC_CHUNK_MIN_SIZE:-64}  # what: chunks below this are merged into the previous chunk | options: integer tokens
+        SEMANTIC_CHUNK_MAX_SIZE: ${SEMANTIC_CHUNK_MAX_SIZE:-1024}  # what: hard cap per semantic chunk | options: integer tokens (512-1024 recommended)
+        SEMANTIC_CHUNK_BUFFER_SIZE: ${SEMANTIC_CHUNK_BUFFER_SIZE:-1}  # what: neighbouring sentences averaged when comparing similarity | options: 0 (no smoothing), 1, 2
+        DEFAULT_SEARCH_RESULTS: ${DEFAULT_SEARCH_RESULTS:-10}  # what: results returned when the client asks for no count | options: 1 to MAX_SEARCH_RESULTS
+        MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS:-20}  # what: hard cap on results per search | options: integer >= DEFAULT_SEARCH_RESULTS
+        RERANKER_TOP_N: ${RERANKER_TOP_N:-50}  # what: candidates passed to the re-ranker | options: 10-200 (higher = better recall, slower)
+        USE_BM25: ${USE_BM25:-True}  # what: merge a BM25 keyword ranking with the dense ranking | options: True, False
+        BM25_WEIGHT: ${BM25_WEIGHT:-0.3}  # what: reciprocal-rank-fusion weight of the BM25 list | options: 0-1 (0 = dense only, 0.5 = equal weight, 1 = BM25 only)
+        BM25_K1: ${BM25_K1:-1.5}  # what: BM25 term-frequency saturation | options: 1.2-2.0
+        BM25_B: ${BM25_B:-0.75}  # what: BM25 document-length normalisation | options: 0 (off) to 1 (full)
+        RRF_K: ${RRF_K:-60}  # what: Reciprocal Rank Fusion constant that damps lower-ranked hits | options: 1-100 (60 = paper default)
+        CHROMA_SPACE: ${CHROMA_SPACE:-cosine}  # what: HNSW distance space for the vector index | options: cosine (recommended for normalised embeddings), l2, ip
+        HNSW_EF_SEARCH: ${HNSW_EF_SEARCH:-200}  # what: query-time candidate list size, higher means better recall | options: 10-500
+        HNSW_EF_CONSTRUCTION: ${HNSW_EF_CONSTRUCTION:-200}  # what: build-time candidate list size | options: 100-500 (affects newly built index segments only)
+        USE_FOLDER_AS_TOPIC: ${USE_FOLDER_AS_TOPIC:-True}  # what: derive topic tags from each document's folder path | options: True, False
+        DEFAULT_TOPIC: ${DEFAULT_TOPIC:-uncategorized}  # what: topic used when no folder topic applies | options: any label
+        CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-my-documents}  # what: name of the ChromaDB collection holding the chunks | options: any name (a new name starts an empty index)
+        FULL_SCAN_ON_BOOT: ${FULL_SCAN_ON_BOOT:-False}  # what: re-index every document when the server starts | options: True, False
+        FOLDER_WATCHER_ACTIVE_ON_BOOT: ${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}  # what: watch DOCS_DIR and index changes when the server starts | options: True, False
+        DEBOUNCE_SECONDS: ${DEBOUNCE_SECONDS:-10}  # what: idle time after the last file change before it is processed | options: integer seconds
+        FULL_SCAN_INTERVAL_DAYS: ${FULL_SCAN_INTERVAL_DAYS:-7}  # what: days between automatic full rescans while the watcher runs | options: integer days
     container_name: docs-to-ai
     image: mcp/docs-to-ai
 
     # Volumes for persistent data
     volumes:
-      - ./cache/chromadb:/app/cache/chromadb # chromadb database (persists the vector store)
-      - ./cache/doc_cache:/app/cache/doc_cache # Document cache (persists extracted text)
-      - ./my-docs:/app/my-docs:ro  # Documents directory (your PDFs and Word docs)# Read-only to prevent accidental modifications
+      - ./cache/chromadb:/app/cache/chromadb # vector store (persists the index)
+      - ./cache/doc_cache:/app/cache/doc_cache # extracted text cache
+      - ./my-docs:/app/my-docs:ro # your documents, read-only so the server cannot modify them
 
-    # Environment variables (optional). These override the values baked into
-    # the image at build time, so you can retune without rebuilding.
+    # Runtime settings. These override the values baked into the image at build
+    # time, so you can retune without rebuilding. Each line ends with a comment:
+    # what it does and the valid options.
     environment:
-      - PYTHONUNBUFFERED=1 # ensures that the python output i.e. the stdout and stderr streams are sent straight to terminal (e.g. your container log) without being first buffered
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
-      - EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION:-1024}
-      - EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-32}
-      # - EMBEDDING_QUERY_PROMPT=...  # defaults to the model's built-in query prompt
-      - USE_GPU_ACCELERATION_IF_AVAILABLE=${USE_GPU_ACCELERATION_IF_AVAILABLE:-True}
-      - GPU_DEVICE_INDEX=${GPU_DEVICE_INDEX:-0}
-      - CHUNKING_STRATEGY=${CHUNKING_STRATEGY:-semantic}
-      - CHUNK_SIZE=${CHUNK_SIZE:-1024}
-      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
-      - CHUNK_BY_TOKEN=${CHUNK_BY_TOKEN:-True}
-      - TOKENIZER_MODEL=${TOKENIZER_MODEL:-cl100k_base}
-      - PRESERVE_HEADINGS=${PRESERVE_HEADINGS:-True}
-      - MAX_HEADING_CHUNK_SIZE=${MAX_HEADING_CHUNK_SIZE:-1024}
-      - MIN_CHUNK_SIZE=${MIN_CHUNK_SIZE:-50}
-      - SEMANTIC_CHUNK_PERCENTILE=${SEMANTIC_CHUNK_PERCENTILE:-95}
-      - SEMANTIC_CHUNK_MIN_SIZE=${SEMANTIC_CHUNK_MIN_SIZE:-64}
-      - SEMANTIC_CHUNK_MAX_SIZE=${SEMANTIC_CHUNK_MAX_SIZE:-1024}
-      - SEMANTIC_CHUNK_BUFFER_SIZE=${SEMANTIC_CHUNK_BUFFER_SIZE:-1}
-      - USE_RERANKER=${USE_RERANKER:-True}
-      - RERANKER_MODEL=${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
-      - RERANKER_TOP_N=${RERANKER_TOP_N:-50}
-      - USE_BM25=${USE_BM25:-True}
-      - BM25_WEIGHT=${BM25_WEIGHT:-0.3}
-      - BM25_K1=${BM25_K1:-1.5}
-      - BM25_B=${BM25_B:-0.75}
-      - RRF_K=${RRF_K:-60}
-      - CHROMA_SPACE=${CHROMA_SPACE:-cosine}
-      - HNSW_EF_SEARCH=${HNSW_EF_SEARCH:-200}
-      - HNSW_EF_CONSTRUCTION=${HNSW_EF_CONSTRUCTION:-200}
-      - DEFAULT_SEARCH_RESULTS=${DEFAULT_SEARCH_RESULTS:-10}
-      - MAX_SEARCH_RESULTS=${MAX_SEARCH_RESULTS:-20}
-      - USE_FOLDER_AS_TOPIC=${USE_FOLDER_AS_TOPIC:-True}
-      - DEFAULT_TOPIC=${DEFAULT_TOPIC:-uncategorized}
-      - CHROMA_COLLECTION_NAME=${CHROMA_COLLECTION_NAME:-my-documents}
-      # Startup behavior control (defaults to True if not set)
-      - FULL_SCAN_ON_BOOT=${FULL_SCAN_ON_BOOT:-False}
-      - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}
-      - DEBOUNCE_SECONDS=${DEBOUNCE_SECONDS:-10}
-      - FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS:-7}
-      # # MCP server transport configuration
-      # - MCP_TRANSPORT=${MCP_TRANSPORT:-stdio}
-      # - MCP_HOST=${MCP_HOST:-0.0.0.0}
-      # - MCP_PORT=${MCP_PORT:-38777}
-        
+      - PYTHONUNBUFFERED=1 # what: send stdout/stderr straight to the container log instead of buffering | options: 1 (on), 0 (off)
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B} # what: sentence-transformer model for dense vectors | options: any Hugging Face embedding model, e.g. Qwen/Qwen3-Embedding-0.6B, BAAI/bge-m3, all-MiniLM-L6-v2
+      - EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION:-1024} # what: vector size of the index, must match the model | options: 384 (MiniLM), 768 (bge-base), 1024 (Qwen3-0.6B, bge-m3)
+      - EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-32} # what: texts embedded per batch | options: 1-128 (64-128 on a GPU, 8-32 on CPU)
+      # - EMBEDDING_QUERY_PROMPT=Instruct: Given a web search query, retrieve relevant passages that answer the query # what: instruction prefix added to queries only | options: any text, or leave this line commented out to use the model's built-in query prompt
+      - USE_GPU_ACCELERATION_IF_AVAILABLE=${USE_GPU_ACCELERATION_IF_AVAILABLE:-True} # what: use a CUDA/MPS device for embedding and re-ranking when present | options: True, False (False = always CPU)
+      - GPU_DEVICE_INDEX=${GPU_DEVICE_INDEX:-0} # what: which CUDA GPU to use | options: 0 to (GPU count - 1); 0 = first GPU
+      - CHUNKING_STRATEGY=${CHUNKING_STRATEGY:-semantic} # what: how documents are split into chunks | options: semantic, by_paragraph, semantic_heading, fixed_size, by_token
+      - CHUNK_SIZE=${CHUNK_SIZE:-1024} # what: target chunk size for non-semantic strategies | options: integer; tokens when CHUNK_BY_TOKEN=True, otherwise characters
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200} # what: overlap between chunks | options: 0 to CHUNK_SIZE-1, same unit as CHUNK_SIZE
+      - CHUNK_BY_TOKEN=${CHUNK_BY_TOKEN:-True} # what: measure chunk sizes in tokens | options: True, False
+      - TOKENIZER_MODEL=${TOKENIZER_MODEL:-cl100k_base} # what: tiktoken encoding used to count tokens | options: cl100k_base, o200k_base, p50k_base
+      - PRESERVE_HEADINGS=${PRESERVE_HEADINGS:-True} # what: split on headings and keep the heading in each chunk | options: True, False
+      - MAX_HEADING_CHUNK_SIZE=${MAX_HEADING_CHUNK_SIZE:-1024} # what: max size per heading chunk | options: integer, same unit as CHUNK_SIZE
+      - MIN_CHUNK_SIZE=${MIN_CHUNK_SIZE:-50} # what: drop fragments smaller than this | options: integer, same unit as CHUNK_SIZE
+      - SEMANTIC_CHUNK_PERCENTILE=${SEMANTIC_CHUNK_PERCENTILE:-95} # what: percentile of sentence dissimilarity used as a cut point | options: 0-100
+      - SEMANTIC_CHUNK_MIN_SIZE=${SEMANTIC_CHUNK_MIN_SIZE:-64} # what: minimum tokens per semantic chunk | options: integer tokens
+      - SEMANTIC_CHUNK_MAX_SIZE=${SEMANTIC_CHUNK_MAX_SIZE:-1024} # what: maximum tokens per semantic chunk | options: integer tokens (512-1024 recommended)
+      - SEMANTIC_CHUNK_BUFFER_SIZE=${SEMANTIC_CHUNK_BUFFER_SIZE:-1} # what: neighbouring sentences averaged for similarity | options: 0, 1, 2
+      - USE_RERANKER=${USE_RERANKER:-True} # what: re-score fused candidates with a cross-encoder | options: True, False
+      - RERANKER_MODEL=${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2} # what: cross-encoder used for re-ranking | options: any Hugging Face cross-encoder, e.g. cross-encoder/ms-marco-MiniLM-L-6-v2, BAAI/bge-reranker-v2-m3
+      - RERANKER_TOP_N=${RERANKER_TOP_N:-50} # what: candidates passed to the re-ranker | options: 10-200
+      - USE_BM25=${USE_BM25:-True} # what: merge a BM25 keyword ranking with the dense ranking | options: True, False
+      - BM25_WEIGHT=${BM25_WEIGHT:-0.3} # what: RRF weight of the BM25 list | options: 0-1 (0.5 = equal weight)
+      - BM25_K1=${BM25_K1:-1.5} # what: BM25 term-frequency saturation | options: 1.2-2.0
+      - BM25_B=${BM25_B:-0.75} # what: BM25 length normalisation | options: 0 (off) to 1 (full)
+      - RRF_K=${RRF_K:-60} # what: Reciprocal Rank Fusion constant | options: 1-100 (60 = paper default)
+      - CHROMA_SPACE=${CHROMA_SPACE:-cosine} # what: HNSW distance space | options: cosine (recommended), l2, ip
+      - HNSW_EF_SEARCH=${HNSW_EF_SEARCH:-200} # what: query-time candidate list size, higher means better recall | options: 10-500
+      - HNSW_EF_CONSTRUCTION=${HNSW_EF_CONSTRUCTION:-200} # what: build-time candidate list size | options: 100-500
+      - DEFAULT_SEARCH_RESULTS=${DEFAULT_SEARCH_RESULTS:-10} # what: results returned when no count is asked for | options: 1 to MAX_SEARCH_RESULTS
+      - MAX_SEARCH_RESULTS=${MAX_SEARCH_RESULTS:-20} # what: hard cap on results per search | options: integer >= DEFAULT_SEARCH_RESULTS
+      - USE_FOLDER_AS_TOPIC=${USE_FOLDER_AS_TOPIC:-True} # what: build topic tags from folder names | options: True, False
+      - DEFAULT_TOPIC=${DEFAULT_TOPIC:-uncategorized} # what: topic for documents outside known folders | options: any label
+      - CHROMA_COLLECTION_NAME=${CHROMA_COLLECTION_NAME:-my-documents} # what: ChromaDB collection name | options: any name (a new name starts an empty index)
+      - FULL_SCAN_ON_BOOT=${FULL_SCAN_ON_BOOT:-False} # what: re-index every document at server start | options: True, False
+      - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True} # what: start the folder watcher at server start | options: True, False
+      - DEBOUNCE_SECONDS=${DEBOUNCE_SECONDS:-10} # what: idle time after the last file change | options: integer seconds
+      - FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS:-7} # what: days between automatic full rescans | options: integer days
+      # MCP server transport (only needed when the client connects over HTTP/SSE
+      # instead of stdio). Values also come from docker-compose ports below.
+      # - MCP_TRANSPORT=${MCP_TRANSPORT:-stdio} # what: how the server talks to its client | options: stdio (local), websocket (HTTP/SSE)
+      # - MCP_HOST=${MCP_HOST:-0.0.0.0} # what: bind address in websocket mode | options: 0.0.0.0 (all interfaces), 127.0.0.1 (local only)
+      # - MCP_PORT=${MCP_PORT:-38777} # what: TCP port in websocket mode | options: 1-65535
+
     # Stdin/stdout for MCP protocol (needed for stdio mode)
     stdin_open: true
     tty: false
 
-    # # # Port mapping for websocket/SSE mode
+    # Port mapping for websocket/SSE mode
     ports:
-      - "${MCP_PORT:-38777}:38777"
+      - "${MCP_PORT:-38777}:38777" # what: expose the HTTP/SSE endpoint on the host | options: any free host port, e.g. 8080:38777
 
     # Restart policy
     restart: unless-stopped
-    
+
     # GPU passthrough (optional). Uncomment to expose NVIDIA GPUs to the
     # container; requires the NVIDIA driver + NVIDIA Container Toolkit on the
     # host, and a CUDA-enabled torch build (the PyPI Linux wheel is CUDA-enabled).
@@ -134,6 +136,5 @@ services:
     #       cpus: '1'
     #       memory: 2G
 
-    
     # Command can be overridden
     # command: python mcp_server.py
