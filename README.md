@@ -16,6 +16,7 @@ Supported extensions: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb
     - [Claude Desktop config](#claude-desktop-config)
   - [Install with Docker](#install-with-docker)
     - [Docker volumes, ports, and env](#docker-volumes-ports-and-env)
+  - [Disk space](#disk-space)
   - [Project structure](#project-structure)
   - [MCP tools](#mcp-tools)
   - [Example questions for the LLM](#example-questions-for-the-llm)
@@ -123,7 +124,7 @@ python mcp_server.py                 # start the MCP server
 
 Windows helper scripts sit in the repo root: `1.setup-python-env.ps1`, `2.scan-all-my-documents-in-python.ps1`, `3.run-mcp-server-in-python.ps1`.
 
-The first scan downloads the embedding model (about 1.2 GB) and the re-ranker (about 90 MB). Pre-download both with `python -m app.download_models`.
+The first scan downloads the embedding model (about 1.2 GB) and the re-ranker (about 90 MB). Pre-download both with `python -m app.download_models`. See [Disk space](#disk-space) for every model, its size, and the total a setup needs.
 
 Scanned PDFs are read by Marker, which is optional: without it every other file type still indexes.
 
@@ -370,6 +371,72 @@ python -m app.scan_all_my_documents --doc-dir ./my-docs --reset
 ```
 
 The vector store is a cache built from your documents. A recreate never touches the source files.
+
+## Disk space
+
+The code is small. The models are not: several neural models run locally, and together they need more disk than everything else combined. Budget about **2.8 GB** for a CPU install with OCR, and **7 to 16 GB** for a GPU install, depending on how much accuracy you ask Marker for. That is a one-time cost per machine. The index and the extraction cache grow with your corpus on top of it.
+
+### Models
+
+| Model | What it does | Download |
+|---|---|---|
+| `Qwen/Qwen3-Embedding-0.6B` | Embeds chunks and queries, and the per-sentence passes of semantic chunking. 1136 MB weights, plus tokenizer files | **1.2 GB** |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | Re-scores the fused search candidates | **0.09 GB** |
+| `tiktoken cl100k_base` | Counts tokens so a chunk really is 1024 tokens | 2 MB |
+| `datalab-to/indra-ocr` | Marker `fast` mode: ONNX layout and line OCR for scanned pages | **0.12 GB** |
+| `datalab-to/surya-ocr-2.5` | Marker `balanced`/`vllm` mode: 650M-parameter VLM that reads scans, tables, and maths | **1.3 GB** |
+| Surya layout, text-detection, and OCR-error checkpoints | Page layout and OCR confidence for Marker `balanced` | **~0.3 GB** |
+
+Base install (embedding, re-ranker, tokenizer) is 1.3 GB of models. Marker `fast` adds 0.12 GB, because it runs its own small ONNX models and needs no VLM. Marker `balanced` or `vllm` adds about 1.6 GB of models, and needs `vllm` (several GB of wheels) or `llama.cpp` on top.
+
+Weights download on first use and stay cached:
+
+- Linux/macOS: `~/.cache/huggingface`
+- Windows: `%USERPROFILE%\.cache\huggingface`
+- Marker's models follow `MARKER_MODEL_CACHE` when it is set (`HF_HOME`), so they can live on another volume.
+
+Nothing re-downloads after that. `python -m app.download_models` fetches everything up front, which is what the Docker build does.
+
+### Python packages
+
+| Setup | What is installed | Disk |
+|---|---|---|
+| CPU, no OCR | torch (CPU), transformers, chromadb, fastmcp, sentence-transformers | ~1.2 GB |
+| CPU with Marker `fast` | the above, plus Marker, Surya, ONNX runtime, torch 2.15 | ~1.4 GB (measured) |
+| GPU | the CUDA torch wheel and its CUDA libraries instead of the CPU wheel | 5.5-6.5 GB |
+| GPU with `MARKER_MODE=balanced` or `vllm` | plus `vllm` and its CUDA kernels | +5 to 7 GB |
+
+### Totals
+
+| Setup | Packages | Models | Total |
+|---|---|---|---|
+| CPU, text-layer PDFs only (`OCR_ENABLED=False`, no marker extra) | 1.2 GB | 1.3 GB | **~2.5 GB** |
+| CPU with Marker `fast` (the default setup) | 1.4 GB | 1.4 GB | **~2.8 GB** |
+| GPU with Marker `fast` | 5.5-6.5 GB | 1.4 GB | **~7-8 GB** |
+| GPU with Marker `balanced` or `vllm` | 11-13 GB | 2.9 GB | **~14-16 GB** |
+
+The GPU ranges are wide because the CUDA PyTorch wheel and `vllm` differ per CUDA version. Measure your own install with `du -sh .venv ~/.cache/huggingface` (`Get-ChildItem -Recurse | Measure-Object Length -Sum` on Windows).
+
+Leave a couple of GB free while the models download: the largest file (1.3 GB) is written to a temporary name before it is moved into the cache.
+
+In Docker the models are baked into the image when you build with `INSTALL_MARKER=True`, so the image grows by the model sizes above: about 3 GB for the CPU image, against about 2.5 GB without the extra. That keeps `docker compose up` from downloading anything. To keep the image small instead, mount a volume for the Marker models and let them download once:
+
+```yaml
+# docker-compose.yml
+volumes:
+  - ./cache/marker:/app/cache/marker
+environment:
+  - MARKER_MODEL_CACHE=/app/cache/marker
+```
+
+### The index and the cache grow with your documents
+
+| Folder | What grows | Measured |
+|---|---|---|
+| `cache/chromadb` | One vector (1024 floats = 4 KB) plus the chunk text and metadata, plus the HNSW graph | 18 MB for 514 chunks, about 35 KB per chunk |
+| `cache/doc_cache` | The extracted text of each document, so a re-scan skips the parse | Typically 10-30% of the source documents' size |
+
+Rough guide for the vector store: 1 GB per 30,000 chunks, so 10,000 documents of average length (about 100 chunks each) need around 35 GB. Removing documents does not shrink it: run a scan with `--reset`, or delete `cache/chromadb`, to reclaim the space.
 
 ## Project structure
 
