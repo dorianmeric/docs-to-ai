@@ -1,89 +1,137 @@
 """
-OCR for scanned PDF pages.
+OCR for scanned PDF pages, using Marker (datalab-to/marker).
 
 A scanned PDF stores page images and no text layer, so ``page.get_text()``
-returns an empty string and the page would be indexed with no text. The PDF
-extractor calls :func:`ocr_page_text` for such a page: the page is rasterised
-with PyMuPDF and read by Tesseract through ``pytesseract``.
+returns an empty string and those pages would be indexed with nothing. The PDF
+extractor hands exactly those pages to :func:`ocr_read_pages`, which runs
+Marker on the document and returns the recognised text per page.
 
-The engine is optional. A missing Python package, a missing Tesseract program,
-or a missing language pack makes :func:`ocr_status` report the reason, and the
-PDF extractor then keeps the empty text and logs one warning. Nothing else
-breaks when OCR cannot run.
+Marker is an optional dependency because it brings its own PyTorch build and
+models (about 110 MB for the default ``fast`` mode, several GB for the GPU
+modes)::
 
-Install:
-    python: ``uv sync`` (pytesseract and pillow are project dependencies)
-    program: Debian/Ubuntu ``apt-get install tesseract-ocr tesseract-ocr-eng``,
-             Windows ``winget install UB-Mannheim.TesseractOCR``,
-             macOS ``brew install tesseract``
-    extra languages: install the matching pack, e.g. ``tesseract-ocr-deu``, and
-             set ``OCR_LANG=deu`` (combine with ``+``: ``OCR_LANG=deu+eng``)
+    uv sync --extra marker
+
+Without it the server still runs; scanned pages stay empty and one warning
+explains how to install it.
+
+Marker modes (``MARKER_MODE``):
+
+* ``fast`` (default) - in-process ONNX layout and OCR on CPU or GPU, no extra
+  server. Reading a mixed document runs at roughly 7 pages/s.
+* ``balanced`` - Marker decides per page: text layer where it is clean, Surya
+  VLM OCR for scans, tables, and maths. Needs a GPU and ``vllm`` or
+  ``llama.cpp`` installed.
+* ``vllm`` - full-page Surya VLM OCR on every page. Highest accuracy on
+  degraded scans, slowest. Needs a GPU and ``vllm``.
+* ``no_ocr`` / ``auto`` - pass through to Marker unchanged.
 """
 
-import io
-from typing import Optional, Tuple
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from .config import OCR_DPI, OCR_LANG
+from .config import MARKER_DEVICE, MARKER_MODE, MARKER_MODEL_CACHE
 from .logging_utils import log_info, log_warn
 
-# Tesseract's own render window. Below 150 dpi small print turns to mush, and
-# above 600 dpi the extra pixels cost time without adding accuracy.
-MIN_DPI = 150
-MAX_DPI = 600
-
-_status: Optional[Tuple[bool, str]] = None
+# Marker is imported lazily: importing it costs seconds and pulls in torch, so
+# a server without the extra installed must never pay that.
+_ready: Optional[Tuple[bool, str]] = None
 _reported = False
+_models: Optional[Dict[str, Any]] = None
+_engine_lock = threading.Lock()
+
+MODES = ("fast", "balanced", "vllm", "no_ocr", "auto")
 
 
-def _wanted_languages() -> list:
-    return [part.strip() for part in str(OCR_LANG).split('+') if part.strip()]
+def _prepare_environment() -> None:
+    """Point Marker at the right device and model cache before it is imported."""
+    if MARKER_MODEL_CACHE:
+        os.environ.setdefault("HF_HOME", MARKER_MODEL_CACHE)
+    # Marker reads TORCH_DEVICE at import time. Without an override it follows
+    # the same GPU switch as the embedding model, so one setting covers both.
+    if MARKER_DEVICE:
+        os.environ["TORCH_DEVICE"] = MARKER_DEVICE
+    elif "TORCH_DEVICE" not in os.environ:
+        try:
+            from .device import resolve_device
+            device = resolve_device()
+        except Exception:
+            device = "cpu"
+        os.environ["TORCH_DEVICE"] = "cuda" if device.startswith("cuda") else device
 
 
 def _check() -> Tuple[bool, str]:
-    """Test the Python packages, the Tesseract program, and the language packs."""
+    """Import Marker once and report what it will do."""
+    _prepare_environment()
     try:
-        import pytesseract
-        from PIL import Image  # noqa: F401
+        import marker
+        from marker.models import create_model_dict  # noqa: F401
     except ImportError as exc:
-        return False, f"The Python packages are missing ({exc}). Run 'uv sync'."
-
-    try:
-        version = pytesseract.get_tesseract_version()
-    except Exception as exc:  # pytesseract raises when the program is absent
         return False, (
-            f"The Tesseract program was not found ({type(exc).__name__}). Install Tesseract and its "
-            "packages: Debian 'apt-get install tesseract-ocr tesseract-ocr-eng', "
-            "Windows 'winget install UB-Mannheim.TesseractOCR', macOS 'brew install tesseract'."
+            f"Marker is not installed ({exc}). Run 'uv sync --extra marker' "
+            "(or 'pip install marker-pdf'), then restart the server."
         )
+    except Exception as exc:  # torch or a marker dependency is broken
+        return False, f"Marker could not be imported ({type(exc).__name__}: {exc})."
 
-    wanted = _wanted_languages()
     try:
-        installed = sorted(pytesseract.get_languages(config=''))
+        from importlib.metadata import version as _dist_version
+        version = _dist_version("marker-pdf")
     except Exception:
-        installed = []
-    missing = [lang for lang in wanted if installed and lang not in installed]
-    if missing:
-        return False, (
-            f"Tesseract {version} has no language pack for {', '.join(missing)} "
-            f"(OCR_LANG={OCR_LANG}). Installed: {', '.join(installed)}. Install the pack, for example "
-            f"'apt-get install tesseract-ocr-{missing[0]}', or set OCR_LANG to an installed language."
-        )
+        version = getattr(marker, "__version__", "unknown")
 
-    return True, f"Tesseract {version}, OCR_LANG={OCR_LANG}"
+    mode = MARKER_MODE if MARKER_MODE in MODES else "fast"
+    device = os.environ.get("TORCH_DEVICE", "auto")
+
+    problem = _vlm_backend_problem(mode)
+    if problem:
+        return False, problem
+
+    return True, f"Marker {version}, mode {mode}, device {device}"
+
+
+def _vlm_backend_problem(mode: str) -> Optional[str]:
+    """Explain a missing VLM backend for the modes that need one.
+
+    'fast' runs in-process ONNX, so it needs nothing extra. 'balanced' and
+    'vllm' hand scanned pages to a Surya VLM, which Marker starts through vllm
+    (NVIDIA) or llama.cpp's llama-server (CPU/MPS).
+    """
+    if mode not in ("balanced", "vllm"):
+        return None
+
+    try:
+        import vllm  # noqa: F401
+        return None
+    except Exception:
+        pass
+
+    from shutil import which
+    if which("llama-server"):
+        return None
+
+    return (
+        f"MARKER_MODE={mode} needs a VLM backend, and neither vllm nor llama.cpp was found. "
+        "Install vllm on an NVIDIA machine ('pip install vllm'), or install llama.cpp so that "
+        "'llama-server' is on PATH. Use MARKER_MODE=fast to run without a VLM."
+    )
 
 
 def ocr_status() -> Tuple[bool, str]:
     """Return ``(can OCR run, one-line reason)``; checked once per process.
 
-    The result is logged once. Later calls are silent, so a scan of many
-    scanned documents does not repeat the same warning.
+    The result is logged once. Later calls are silent, so scanning many
+    documents does not repeat the same message.
     """
-    global _status, _reported
-    if _status is None:
-        _status = _check()
-    available, detail = _status
+    global _ready, _reported
+    if _ready is None:
+        _ready = _check()
+    available, detail = _ready
 
-    if not _reported:
+    if not _reported and MARKER_MODE != "no_ocr":
         _reported = True
         if available:
             log_info(f"OCR is available: {detail}", component="OCR")
@@ -96,37 +144,122 @@ def ocr_status() -> Tuple[bool, str]:
 
 
 def ocr_available() -> bool:
-    """True when OCR can run on this machine."""
+    """True when Marker can read a scanned page."""
     return ocr_status()[0]
 
 
-def ocr_dpi() -> int:
-    """OCR_DPI held inside the range Tesseract handles well."""
-    return max(MIN_DPI, min(MAX_DPI, int(OCR_DPI)))
+def _load_models() -> Dict[str, Any]:
+    """Create Marker's model dict once and reuse it for every document."""
+    global _models
+    if _models is not None:
+        return _models
+
+    _prepare_environment()
+    from marker.models import create_model_dict
+
+    mode = MARKER_MODE if MARKER_MODE in MODES else "fast"
+    # 'fast'/'no_ocr' run in-process (ONNX) and must not spawn a VLM server;
+    # 'balanced'/'vllm' talk to vllm or llama.cpp over the inference manager.
+    local_only = mode in ("fast", "no_ocr")
+    started = time.perf_counter()
+    _models = create_model_dict(load_indra=local_only, no_server=local_only)
+    log_info(
+        f"Marker models loaded in {time.perf_counter() - started:.1f}s",
+        component="OCR",
+    )
+    return _models
 
 
-def ocr_page_text(page) -> str:
-    """Run OCR on one PyMuPDF page and return the recognised text.
+def _html_to_text(html: str) -> str:
+    """Marker block HTML to plain text, keeping table rows readable."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html or "", "html.parser")
+
+    for table in soup.find_all("table"):
+        rows = []
+        for row in table.find_all("tr"):
+            cells = [cell.get_text(" ", strip=True) for cell in row.find_all(["th", "td"])]
+            cells = [cell for cell in cells if cell]
+            if cells:
+                rows.append(" | ".join(cells))
+        table.replace_with("\n" + "\n".join(rows) + "\n" if rows else "")
+
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for block_tag in soup.find_all(
+        ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre", "div", "tr"]
+    ):
+        block_tag.append("\n")
+
+    lines = [line.strip() for line in soup.get_text().splitlines()]
+    compact: List[str] = []
+    for line in lines:
+        if line or (compact and compact[-1]):
+            compact.append(line)
+    return "\n".join(compact).strip()
+
+
+def _page_index(page_block_id: str, position: int) -> int:
+    """Marker page id '/page/7/Page/0' to the 0-based page index."""
+    parts = str(page_block_id).split("/")
+    if len(parts) > 2 and parts[2].isdigit():
+        return int(parts[2])
+    return position
+
+
+def ocr_read_pages(pdf_path: Path, page_indexes: List[int]) -> Dict[int, str]:
+    """Read the given 0-based pages of a PDF with Marker.
 
     Args:
-        page: A ``pymupdf``/``fitz`` page object.
+        pdf_path: Path to the PDF.
+        page_indexes: 0-based page numbers to read, in document order.
 
     Returns:
-        The recognised text, or an empty string when OCR is unavailable, the
-        page cannot be rendered, or Tesseract finds no text.
+        ``{page_index: text}`` for the pages Marker returned. An empty dict
+        means OCR could not run or returned nothing; the reason is logged.
     """
-    if not ocr_available():
-        return ""
+    if not page_indexes or not ocr_available():
+        return {}
 
-    page_number = getattr(page, 'number', 0) + 1
+    started = time.perf_counter()
     try:
-        import pytesseract
-        from PIL import Image
+        with _engine_lock:  # Marker's models are not safe for parallel calls
+            from marker.converters.pdf import PdfConverter
+            from marker.output import json_to_html
 
-        pixmap = page.get_pixmap(dpi=ocr_dpi())
-        image = Image.open(io.BytesIO(pixmap.tobytes("png")))
-        return pytesseract.image_to_string(image, lang=OCR_LANG) or ""
+            converter = PdfConverter(
+                artifact_dict=_load_models(),
+                renderer="marker.renderers.json.JSONRenderer",
+                config={
+                    "mode": MARKER_MODE if MARKER_MODE in MODES else "fast",
+                    "page_range": list(page_indexes),
+                    # These pages were chosen because they have no text layer, so
+                    # OCR always runs instead of trusting an empty text layer
+                    "force_ocr": True,
+                    "disable_tqdm": True,
+                },
+            )
+            rendered = converter(str(pdf_path))
+
+        texts: Dict[int, str] = {}
+        for position, page_block in enumerate(getattr(rendered, "children", None) or []):
+            index = _page_index(getattr(page_block, "id", ""), position)
+            parts = [_html_to_text(json_to_html(block)) for block in (page_block.children or [])]
+            text = "\n\n".join(part for part in parts if part)
+            texts[index] = text
     except Exception as exc:
-        # A page that fails must not stop the document; the text stays empty.
-        log_warn(f"OCR failed on page {page_number} ({type(exc).__name__}: {exc})", component="OCR")
-        return ""
+        log_warn(
+            f"Marker could not read {pdf_path.name} ({type(exc).__name__}: {exc}). "
+            "The scanned pages stay empty.",
+            component="OCR",
+        )
+        return {}
+
+    elapsed = time.perf_counter() - started
+    log_info(
+        f"Marker read {len(texts)} page(s) of {pdf_path.name} in {elapsed:.1f}s "
+        f"({elapsed / max(1, len(texts)):.1f}s per page)",
+        component="OCR",
+    )
+    return texts

@@ -179,12 +179,13 @@ HNSW_EF_CONSTRUCTION = _env_int('HNSW_EF_CONSTRUCTION', 200)  # Build-time candi
 # Docker it is bind-mounted, so the files land on the host.
 SLOW_QUERY_MS = _env_int('SLOW_QUERY_MS', 20000)  # warn when one search takes longer than this
 
-# OCR Configuration (scanned PDFs without a text layer)
+# OCR for scanned PDFs (pages without a text layer). Marker reads them.
 OCR_ENABLED = _env_bool('OCR_ENABLED', True)  # run OCR on PDF pages with little or no text
 OCR_MIN_TEXT_CHARS = _env_int('OCR_MIN_TEXT_CHARS', 20)  # page text below this triggers OCR
-OCR_DPI = _env_int('OCR_DPI', 300)  # rasterisation resolution before OCR
-OCR_LANG = _env_str('OCR_LANG', 'eng')  # tesseract language pack, e.g. eng, deu, fra
 OCR_MAX_PAGES = _env_int('OCR_MAX_PAGES', 9999)  # ceiling on OCR pages per document, 0 turns OCR off
+MARKER_MODE = _env_str('MARKER_MODE', 'fast')  # fast | balanced | vllm | no_ocr | auto
+MARKER_DEVICE = _env_str('MARKER_DEVICE', '')  # empty follows USE_GPU_ACCELERATION_IF_AVAILABLE
+MARKER_MODEL_CACHE = _env_str('MARKER_MODEL_CACHE', '')  # HF_HOME for the Marker models, empty = HF default
 LOG_DIR = Path(os.getenv('LOG_DIR', str(BASE_DIR / "logs")))
 LOG_DIR.mkdir(exist_ok=True, parents=True)
 LOG_LEVEL = _env_str('LOG_LEVEL', 'INFO').upper()  # DEBUG, INFO, WARNING, ERROR

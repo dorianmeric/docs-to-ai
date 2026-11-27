@@ -225,8 +225,8 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
                 # Document was read but yielded no text (empty file, image-only PDF, ..)
                 ocr_hint = (
                     "A scanned PDF has no text layer. OCR reads it only when OCR_ENABLED=True and "
-                    "Tesseract is installed (the Docker image includes it). A page whose scan is "
-                    "too faint, or OCR_MAX_PAGES=0, also leaves the text empty."
+                    "Marker is installed ('uv sync --extra marker'). A blank page, or "
+                    "OCR_MAX_PAGES=0, also leaves the text empty."
                     if ext == '.pdf' else
                     "Check that the file is not empty and holds text."
                 )

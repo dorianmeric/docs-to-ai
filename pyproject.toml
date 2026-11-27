@@ -15,6 +15,9 @@ dependencies = [
     "tiktoken>=0.12.0",
     "beautifulsoup4>=4.14.3",
     "python-pptx>=1.0.2",
-    "pytesseract>=0.3.13",
-    "pillow>=11.0.0",
 ]
+
+# Marker reads scanned PDFs. It is optional because it brings its own torch
+# build and models: install it with 'uv sync --extra marker'.
+[project.optional-dependencies]
+marker = ["marker-pdf>=2.2.0"]

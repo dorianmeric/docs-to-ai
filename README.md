@@ -125,20 +125,15 @@ Windows helper scripts sit in the repo root: `1.setup-python-env.ps1`, `2.scan-a
 
 The first scan downloads the embedding model (about 1.2 GB) and the re-ranker (about 90 MB). Pre-download both with `python -m app.download_models`.
 
-Scanned PDFs need the Tesseract program. It is optional: without it every other file type still indexes.
+Scanned PDFs are read by Marker, which is optional: without it every other file type still indexes.
 
 ```bash
-# Debian / Ubuntu
-sudo apt-get install tesseract-ocr tesseract-ocr-eng
-
-# Windows
-winget install UB-Mannheim.TesseractOCR
-
-# macOS
-brew install tesseract
+uv sync --extra marker    # adds marker-pdf, its torch build, and the OCR models
 ```
 
-Checking it worked: `python mcp_server.py --show-config` prints `OCR_STATUS=ready (...)` once Tesseract is found. The Docker image already includes Tesseract and the English pack.
+The `fast` mode needs no extra server and downloads about 110 MB of models on first use. `balanced` and `vllm` need `vllm` (NVIDIA GPU) or `llama.cpp`; see [OCR for scanned PDFs](#ocr-for-scanned-pdfs).
+
+Checking it worked: `python mcp_server.py --show-config` prints `OCR_STATUS=ready (Marker ...)` once Marker and its models are reachable.
 
 ### Scan options
 
@@ -360,6 +355,14 @@ docker build --build-arg EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B --build-arg U
 
 Rebuild the image after changing `EMBEDDING_MODEL` or `USE_RERANKER`. Model pre-download happens at build time. Chunking and search settings need a re-scan, not a rebuild.
 
+Scanned PDFs need the optional OCR engine, which is not in the default image:
+
+```bash
+docker compose build --build-arg INSTALL_MARKER=True
+```
+
+That adds Marker, its PyTorch build, and the OCR models to the image (about 110 MB of models for the default `fast` mode). Leave it out if you only index files that already carry text. Without it the container logs one warning and scanned pages stay empty. `MARKER_MODE=balanced` and `vllm` also need `vllm` plus an NVIDIA GPU inside the container; build those images from a base that has `vllm`.
+
 Changing `EMBEDDING_MODEL`, `EMBEDDING_DIMENSION`, or `CHROMA_SPACE` forces a new collection. ChromaDB cannot change vector size or distance space in place. The server records the model name and dimension in collection metadata. A stale collection is detected and recreated at startup. Re-scan after the recreate:
 
 ```bash
@@ -377,6 +380,7 @@ The vector store is a cache built from your documents. A recreate never touches 
 - `app/bm25_index.py` holds the in-memory BM25 index for the sparse side of hybrid search.
 - `app/device.py` picks the compute device: CUDA, MPS, or CPU.
 - `app/scan_all_my_documents.py` runs batch ingestion.
+- `app/ocr.py` reads scanned PDF pages with Marker (optional extra).
 - `app/incremental_updater.py` applies single-file changes.
 - `app/folder_watcher.py` watches folders and debounces changes.
 - `app/config.py` holds settings and the `.env` loader.
@@ -484,34 +488,53 @@ Token counts come from tiktoken, not from the embedding model tokenizer. Counts 
 
 ### OCR for scanned PDFs
 
-A scanned PDF stores a picture of each page, not text. Text extraction finds nothing, and the page would be indexed empty. When a page's text layer holds fewer than `OCR_MIN_TEXT_CHARS` characters, the page is rendered to an image and read by Tesseract, and the recognised text is indexed like any other text. Each chunk records that it came from OCR, so results and `get_document` mark those pages `(OCR)`.
+A scanned PDF stores a picture of each page, not text. Text extraction finds nothing, and the page would be indexed empty. When a page's text layer holds fewer than `OCR_MIN_TEXT_CHARS` characters, that page is read by [Marker](https://github.com/datalab-to/marker) (datalab-to/marker), which does layout analysis before OCR, so multi-column scans, tables, and forms come back in reading order. The recognised text is indexed like any other text, and each chunk records that it came from OCR, so results and `get_document` mark those pages `(OCR)`.
+
+Marker is an optional dependency because it brings its own PyTorch build and models:
+
+```bash
+uv sync --extra marker          # local install
+# Docker: build with INSTALL_MARKER=True
+```
+
+Without it the server still runs: every other file type indexes, and one warning says how to install Marker.
 
 | Setting | Env var | Default | Description |
 |---|---|---|---|
 | OCR on | `OCR_ENABLED` | `True` | Read pages that have no usable text layer |
 | Scan threshold | `OCR_MIN_TEXT_CHARS` | `20` | A page below this many characters is treated as a scan |
-| Render resolution | `OCR_DPI` | `300` | DPI the page is rasterised at before OCR, held between 150 and 600 |
-| Language | `OCR_LANG` | `eng` | Tesseract language pack(s); combine with `+`, for example `deu+eng` |
 | Pages per document | `OCR_MAX_PAGES` | `9999` | Ceiling on scanned pages read per document; `0` turns OCR off |
+| Marker mode | `MARKER_MODE` | `fast` | `fast`, `balanced`, `vllm`, `no_ocr`, or `auto` |
+| Marker device | `MARKER_DEVICE` | empty | `cuda`, `cuda:1`, `mps`, `cpu`; empty follows `USE_GPU_ACCELERATION_IF_AVAILABLE` |
+| Model cache | `MARKER_MODEL_CACHE` | empty | `HF_HOME` for Marker's models; empty uses the Hugging Face cache |
+
+Marker modes, from Marker's own benchmarks:
+
+| Mode | Hardware | Speed | Best for |
+|---|---|---|---|
+| `fast` (default) | CPU or GPU, in-process ONNX | ~7 pages/s mixed | Everyday scans. No `vllm`, no extra server, ~110 MB of models |
+| `balanced` | GPU, needs `vllm` or `llama.cpp` | ~17 pages/s | Tables, maths, and difficult scans |
+| `vllm` | GPU, needs `vllm` | ~4.5 pages/s | Degraded scans, handwriting, dense formulas |
+| `no_ocr` | any | fastest | Text-layer PDFs only; scans are skipped |
 
 How it behaves:
 
-- Only pages that need it go through OCR. A PDF with a text layer costs nothing extra, and a mixed PDF reads its scanned pages only.
+- Only pages that need it are read. A PDF with a text layer costs nothing extra, and a mixed PDF hands Marker just its scanned pages (Marker's `page_range`).
 - Blank pages are skipped. A page with no image and no drawing has nothing to read.
-- Every scanned page is read by default: `OCR_MAX_PAGES=9999` is no practical limit. The setting stays as a ceiling for pathological files; set it lower to bound the time a single huge scan can take. When a document hits the ceiling the log says how many pages were left. `OCR_MAX_PAGES=0` turns OCR off.
-- OCR runs once per document. The extracted text is cached in `cache/doc_cache`, so later scans and `get_document` reuse it.
-- Turning OCR on, or changing `OCR_DPI`, `OCR_LANG`, `OCR_MIN_TEXT_CHARS`, or `OCR_MAX_PAGES`, makes the cached text of PDFs stale. The next scan re-reads those PDFs, so previously empty scans fill in. Other file types keep their cached text.
-- OCR is CPU work: roughly 0.5-2 seconds per page at 300 DPI, so a 500-page scan takes several minutes once. It happens at index time, not at search time, and the result is cached.
-- Without Tesseract the server still runs. It logs one warning, and scanned pages stay empty.
-
-Language packs in Docker: the image installs `tesseract-ocr` and `tesseract-ocr-eng`. For another language, add the pack to the `apt-get` line in the [Dockerfile](Dockerfile) (`tesseract-ocr-deu`) and set `OCR_LANG=deu`.
+- Every scanned page is read by default: `OCR_MAX_PAGES=9999` is no practical limit. The setting stays as a ceiling for pathological files. When a document hits it, the log says how many pages were left. `OCR_MAX_PAGES=0` turns OCR off.
+- OCR runs once per document. The extracted text lands in `cache/doc_cache`, so later scans and `get_document` reuse it.
+- Turning OCR on, or changing `MARKER_MODE`, `OCR_MIN_TEXT_CHARS`, or `OCR_MAX_PAGES`, makes the cached text of PDFs stale. The next scan re-reads those PDFs, so previously empty scans fill in. Other file types keep their cached text.
+- `MARKER_MODE=balanced` or `vllm` without `vllm` or a `llama-server` binary is reported at startup instead of failing mid-scan.
+- Models live in the Hugging Face cache (about 110 MB for `fast`). Set `MARKER_MODEL_CACHE` to keep them on a mounted volume, or bake them into a Docker image by building with `INSTALL_MARKER=True`.
+- Reading runs at index time, not at search time. `fast` reads a page in well under a second on CPU after the models load; the first document of a run pays a few seconds for model loading.
 
 The log reports the outcome per document:
 
 ```
-[OCR] OCR is available: Tesseract 5.5.0, OCR_LANG=eng
+[OCR] OCR is available: Marker 2.2.0, mode fast, device cpu
+[OCR] Marker read 12 page(s) of contract.pdf in 2.4s (0.2s per page)
 [OCR] OCR read 12 of 20 scanned page(s) in contract.pdf
-[OCR] contract.pdf: OCR stopped after OCR_MAX_PAGES=100 page(s), so 8 more scanned page(s) stay empty.
+[OCR] contract.pdf: OCR stopped after OCR_MAX_PAGES=10 page(s), so 8 more scanned page(s) stay empty.
 ```
 
 ### Search
@@ -687,9 +710,9 @@ USE_RERANKER=True
 DEFAULT_SEARCH_RESULTS=8
 USE_GPU_ACCELERATION_IF_AVAILABLE=True
 GPU_DEVICE_INDEX=0
-OCR_ENABLED=True                  # read scanned PDFs with Tesseract
+OCR_ENABLED=True                  # read scanned PDFs with Marker
 OCR_MAX_PAGES=9999                # ceiling per document; 0 turns OCR off
-OCR_LANG=eng                      # deu+eng for German and English
+MARKER_MODE=fast                  # fast needs no extra backend; balanced/vllm need vllm
 ```
 
 ## Retrieval pipeline
@@ -752,7 +775,7 @@ Two files sit in `logs/` (`/app/logs` in Docker, bind-mounted to `./logs` on the
 | `logs/server.log` | Every action of the server: startup, model loading, watcher events, scans, tool calls, searches, errors |
 | `logs/detail.jsonl` | One JSON object per line for the events needed to debug retrieval: `server_start`, `tool_call`, `search`, `scan_document`, `scan_summary`, `incremental_change`, `watch_batch`, `ocr_document` |
 
-`ocr_document` records what OCR did with one PDF: `total_pages`, the `ocr_pages` list with per-page characters and milliseconds, the pages still without text, the pages skipped by `OCR_MAX_PAGES`, and the pages skipped as blank. Find the slowest scans with `jq 'select(.event=="ocr_document") | {file, pages: (.ocr_pages|length), ms: ([.ocr_pages[].ms]|add)}' logs/detail.jsonl`.
+`ocr_document` records what OCR did with one PDF: `engine` (`marker`), `total_pages`, the `ocr_pages` list with per-page characters, the pages still without text, the pages the OCR engine found nothing in, the pages skipped by `OCR_MAX_PAGES`, and the pages skipped as blank. Find the documents that needed the most OCR work with `jq 'select(.event=="ocr_document") | {file, ocr_pages: (.ocr_pages|length), chars: ([.ocr_pages[].chars]|add), empty: (.pages_still_without_text|length)}' logs/detail.jsonl`.
 
 Both files rotate by size. A full file is renamed to `.1`, `.2`, and so on. The oldest file beyond `LOG_BACKUP_COUNT` is deleted.
 
@@ -906,11 +929,12 @@ The server explains each failure in three parts: what happened, the likely cause
 | `The index is empty, so '<query>' could not match anything.` | Nothing is indexed yet, or the last scan failed. | Run the `scan_all_my_documents` tool, or `python -m app.scan_all_my_documents --doc-dir ./my-docs`. |
 | `No results found for query: '<query>'.` | The words are absent from the chunks, or a filter removed every match. | Try other words. Drop the topic, date, phrase, or regex filter. Call `list_topics` to check topics. |
 | `The PDF '<file>' could not be read.` | The PDF is encrypted, truncated, or not a real PDF. | Remove the password, repair the file, or re-print it to PDF. Then scan again. |
-| `No text could be extracted from '<file>'.` | The file is empty, or a scanned PDF whose pages OCR could not read. | For a PDF, check `OCR_ENABLED=True`, `OCR_MAX_PAGES` above zero, and `OCR_STATUS=ready` in `--show-config`. See [OCR for scanned PDFs](#ocr-for-scanned-pdfs). |
-| `OCR is enabled but unavailable: The Tesseract program was not found` | The Python packages are installed but the Tesseract program is missing, so scans stay empty. | Install it: Debian `apt-get install tesseract-ocr tesseract-ocr-eng`, Windows `winget install UB-Mannheim.TesseractOCR`, macOS `brew install tesseract`. The Docker image already has it. |
-| `OCR is enabled but unavailable: ... has no language pack for <lang>` | `OCR_LANG` names a pack that is not installed. | Install the pack (`apt-get install tesseract-ocr-deu`) or set `OCR_LANG` to an installed one. `--show-config` lists them. |
+| `No text could be extracted from '<file>'.` | The file is empty, or a scanned PDF whose pages OCR could not read. | For a PDF, check `OCR_ENABLED=True`, `OCR_MAX_PAGES` above zero, and that `--show-config` reports `OCR_STATUS=ready`. See [OCR for scanned PDFs](#ocr-for-scanned-pdfs). |
+| `OCR is enabled but unavailable: Marker is not installed` | The optional OCR engine is missing, so scanned pages stay empty. | Run `uv sync --extra marker`, or build the Docker image with `INSTALL_MARKER=True`. Then restart the server. |
+| `OCR is enabled but unavailable: MARKER_MODE=balanced needs a VLM backend` | `balanced`/`vllm` hand pages to a Surya VLM, and neither `vllm` nor `llama-server` was found. | Install `vllm` on an NVIDIA machine or `llama.cpp`, or set `MARKER_MODE=fast`, which needs no backend. |
 | `OCR stopped after OCR_MAX_PAGES=<n> page(s), so <m> more scanned page(s) stay empty` | `OCR_MAX_PAGES` was lowered below the page count of this document. | Raise `OCR_MAX_PAGES`, then re-scan. |
-| `OCR found no text in <n> page(s)` | The scan is too faint, skewed, or blank. | Re-scan at a higher quality, raise `OCR_DPI` to 400-600, or install the right language pack. |
+| `Marker found no text in <n> page(s)` | The page is blank, or `MARKER_MODE=fast` is too weak for the scan. | Try `MARKER_MODE=balanced` (needs `vllm`/`llama.cpp`) or `vllm` for degraded scans. |
+| `Marker could not read '<file>' (...)` | Marker raised while converting the document. | The message names the exception. Check `--show-config` (`OCR_STATUS`, `MARKER_MODE`, `MARKER_DEVICE`), free RAM (`fast` wants a few GB), and that the models finished downloading. |
 | `A Python package needed for this step is missing: <name>.` | The environment does not match `pyproject.toml`. | Run `uv sync`, then restart the server. |
 | `The embedding model '<model>' could not be loaded.` | Model not downloaded, wrong `EMBEDDING_MODEL`, or the device rejected the model. | Run `python -m app.download_models` with network access. Check the model name. Check `torch.cuda.is_available()`. |
 | `A network request failed.` | Hugging Face or PyPI is unreachable, or models were never downloaded. | Connect to the internet and run `python -m app.download_models` once. For offline machines, copy a warm `~/.cache/huggingface` from another machine. |
@@ -953,7 +977,7 @@ Yes. Embedding and re-ranking run on your machine. Downloads happen once, at ins
 
 ### Can I find text inside a scanned PDF?
 
-Yes. Pages with no text layer are rendered and read with OCR (Tesseract) at index time, so a scanned PDF becomes searchable like any other. This needs `OCR_ENABLED=True` (the default) and the Tesseract program. The Docker image includes it; a local install needs one `apt-get`/`winget`/`brew` command. See [OCR for scanned PDFs](#ocr-for-scanned-pdfs).
+Yes. Pages with no text layer are read by Marker at index time, so a scanned PDF becomes searchable like any other. This needs `OCR_ENABLED=True` (the default) and the optional Marker install (`uv sync --extra marker`, or a Docker build with `INSTALL_MARKER=True`). See [OCR for scanned PDFs](#ocr-for-scanned-pdfs).
 
 Every scanned page is read. `OCR_MAX_PAGES` is only a ceiling for huge files (9999 by default, so no practical limit); `0` turns OCR off.
 

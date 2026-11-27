@@ -11,7 +11,7 @@ from .config import (
     MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE,
     SEMANTIC_CHUNK_PERCENTILE, SEMANTIC_CHUNK_MIN_SIZE, SEMANTIC_CHUNK_MAX_SIZE,
     SEMANTIC_CHUNK_BUFFER_SIZE,
-    OCR_ENABLED, OCR_DPI, OCR_LANG, OCR_MAX_PAGES, OCR_MIN_TEXT_CHARS
+    OCR_ENABLED, OCR_MAX_PAGES, OCR_MIN_TEXT_CHARS, MARKER_MODE
 )
 
 from .errors import explain
@@ -36,7 +36,7 @@ except ImportError:
 # Bumped when the shape of a cache entry changes. A cache entry also records
 # the settings that produced its text, so turning OCR on re-reads the PDFs that
 # were cached as empty instead of keeping them unsearchable.
-CACHE_FORMAT_VERSION = 2
+CACHE_FORMAT_VERSION = 3
 
 _ENCODINGS: Dict[str, Any] = {}
 _ENCODING_FAILURES = 0
@@ -50,12 +50,12 @@ def extraction_cache_key(extension: str) -> str:
     """Signature of the settings that change the text extracted from a file type.
 
     The key is per file type because OCR settings only affect PDFs: changing
-    ``OCR_DPI`` must not throw away the cached text of every Word file.
+    ``MARKER_MODE`` must not throw away the cached text of every Word file.
     """
     if extension == '.pdf':
         return (
-            f"v{CACHE_FORMAT_VERSION}:pdf:ocr={int(bool(OCR_ENABLED))}:dpi={OCR_DPI}:"
-            f"lang={OCR_LANG}:min={OCR_MIN_TEXT_CHARS}:max_pages={OCR_MAX_PAGES}"
+            f"v{CACHE_FORMAT_VERSION}:pdf:ocr={int(bool(OCR_ENABLED))}:engine=marker:"
+            f"mode={MARKER_MODE}:min={OCR_MIN_TEXT_CHARS}:max_pages={OCR_MAX_PAGES}"
         )
     return f"v{CACHE_FORMAT_VERSION}:{extension}"
 

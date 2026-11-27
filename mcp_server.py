@@ -280,7 +280,8 @@ def _log_startup_detail(transport: str, host: str, port: int) -> None:
     from app.config import (
         CHROMA_COLLECTION_NAME, CHUNKING_STRATEGY, EMBEDDING_MODEL, FOLDER_WATCHER_ACTIVE_ON_BOOT,
         FULL_SCAN_ON_BOOT, LOG_CHUNK_TEXT_CHARS, LOG_DETAIL_ENABLED, LOG_DIR, RERANKER_MODEL,
-        USE_BM25, USE_RERANKER, OCR_ENABLED, OCR_DPI, OCR_LANG, OCR_MAX_PAGES, OCR_MIN_TEXT_CHARS,
+        USE_BM25, USE_RERANKER, OCR_ENABLED, OCR_MAX_PAGES, OCR_MIN_TEXT_CHARS,
+        MARKER_MODE, MARKER_DEVICE, MARKER_MODEL_CACHE,
     )
     log_detail(
         "server_start",
@@ -297,10 +298,12 @@ def _log_startup_detail(transport: str, host: str, port: int) -> None:
         folder_watcher=FOLDER_WATCHER_ACTIVE_ON_BOOT,
         ocr={
             'enabled': OCR_ENABLED,
+            'engine': 'marker',
             'min_text_chars': OCR_MIN_TEXT_CHARS,
-            'dpi': OCR_DPI,
-            'lang': OCR_LANG,
             'max_pages': OCR_MAX_PAGES,
+            'mode': MARKER_MODE,
+            'device': MARKER_DEVICE or 'auto',
+            'model_cache': MARKER_MODEL_CACHE or 'HF default',
         },
         log_dir=str(LOG_DIR),
         detail_log=LOG_DETAIL_ENABLED,
@@ -346,12 +349,14 @@ async def main():
             print("  SEMANTIC_CHUNK_MIN_SIZE    Min tokens per semantic chunk (default: 64)")
             print("  SEMANTIC_CHUNK_MAX_SIZE    Max tokens per semantic chunk (default: 1024)")
             print("  SEMANTIC_CHUNK_BUFFER_SIZE Neighbouring sentences combined for similarity (default: 1)")
-            print("\nOCR for scanned PDFs (defaults shown):")
+            print("\nOCR for scanned PDFs, via Marker (defaults shown):")
             print("  OCR_ENABLED             Run OCR on PDF pages with no usable text layer (default: True)")
             print("  OCR_MIN_TEXT_CHARS      A page below this many characters counts as a scan (default: 20)")
-            print("  OCR_DPI                 Resolution the page is rendered at before OCR (default: 300)")
-            print("  OCR_LANG                Tesseract language pack(s), e.g. eng or deu+eng (default: eng)")
             print("  OCR_MAX_PAGES           Ceiling on OCR pages per document, 0 turns it off (default: 9999)")
+            print("  MARKER_MODE             fast | balanced | vllm | no_ocr | auto (default: fast)")
+            print("  MARKER_DEVICE           cuda, cuda:1, mps, cpu; empty follows the GPU switch (default: empty)")
+            print("  MARKER_MODEL_CACHE      HF_HOME for the Marker models; empty uses the HF default (default: empty)")
+            print("  (Marker itself is optional: 'uv sync --extra marker')")
             print("\nSearch (defaults shown):")
             print("  DEFAULT_SEARCH_RESULTS  Default number of results (default: 10)")
             print("  MAX_SEARCH_RESULTS      Maximum allowed results (default: 20)")
@@ -398,8 +403,9 @@ async def main():
                 CHUNKING_STRATEGY, CHUNK_SIZE, CHUNK_OVERLAP, CHUNK_BY_TOKEN,
                 TOKENIZER_MODEL, PRESERVE_HEADINGS, MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE,
                 SEMANTIC_CHUNK_PERCENTILE, SEMANTIC_CHUNK_MIN_SIZE, SEMANTIC_CHUNK_MAX_SIZE,
-                SEMANTIC_CHUNK_BUFFER_SIZE, OCR_ENABLED, OCR_MIN_TEXT_CHARS, OCR_DPI, OCR_LANG,
-                OCR_MAX_PAGES, EMBEDDING_MODEL, EMBEDDING_DIMENSION,
+                SEMANTIC_CHUNK_BUFFER_SIZE, OCR_ENABLED, OCR_MIN_TEXT_CHARS, OCR_MAX_PAGES,
+                MARKER_MODE, MARKER_DEVICE, MARKER_MODEL_CACHE,
+                EMBEDDING_MODEL, EMBEDDING_DIMENSION,
                 EMBEDDING_BATCH_SIZE, EMBEDDING_QUERY_PROMPT,
                 USE_GPU_ACCELERATION_IF_AVAILABLE, GPU_DEVICE_INDEX,
                 DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, USE_RERANKER, RERANKER_MODEL,
@@ -437,9 +443,10 @@ async def main():
             print(f"  SEMANTIC_CHUNK_BUFFER_SIZE={SEMANTIC_CHUNK_BUFFER_SIZE}")
             print(f"  OCR_ENABLED={OCR_ENABLED}")
             print(f"  OCR_MIN_TEXT_CHARS={OCR_MIN_TEXT_CHARS}")
-            print(f"  OCR_DPI={OCR_DPI}")
-            print(f"  OCR_LANG={OCR_LANG}")
             print(f"  OCR_MAX_PAGES={OCR_MAX_PAGES}")
+            print(f"  MARKER_MODE={MARKER_MODE}")
+            print(f"  MARKER_DEVICE={MARKER_DEVICE or '(follows USE_GPU_ACCELERATION_IF_AVAILABLE)'}")
+            print(f"  MARKER_MODEL_CACHE={MARKER_MODEL_CACHE or '(HF default)'}")
             try:
                 from app.ocr import ocr_status
                 ok, detail = ocr_status()

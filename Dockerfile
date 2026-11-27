@@ -3,10 +3,8 @@
 
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
-# Install only runtime dependencies for Debian. tesseract-ocr reads scanned
-# PDFs, tesseract-ocr-eng is the English language pack; add more packs (e.g.
-# tesseract-ocr-deu) and point OCR_LANG at them to read other languages.
-RUN apt-get update && apt-get install -y --no-install-recommends libmupdf-dev libfreetype6 libharfbuzz0b libopenjp2-7 libjbig2dec0 libjpeg62-turbo zlib1g tesseract-ocr tesseract-ocr-eng \
+# Install only runtime dependencies for Debian
+RUN apt-get update && apt-get install -y --no-install-recommends libmupdf-dev libfreetype6 libharfbuzz0b libopenjp2-7 libjbig2dec0 libjpeg62-turbo zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -16,8 +14,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock /app/
 
 # Install dependencies (cached). --locked to ensure the dependencies in the lock file are used.
+# INSTALL_MARKER adds the optional OCR engine (Marker), which brings its own
+# torch build and models. The models are downloaded further down, so the image
+# stays usable offline.
+ARG INSTALL_MARKER=False
 ENV UV_LINK_MODE=copy
-RUN --mount=type=cache,target=/root/.cache/uv  uv sync --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv  if [ "$INSTALL_MARKER" = "True" ]; then uv sync --no-install-project --extra marker; else uv sync --no-install-project; fi
 
 # ---------------------------------------------------------------------------
 # Build-time configuration (override with: docker build --build-arg KEY=VALUE)
@@ -63,9 +65,10 @@ ARG DEBOUNCE_SECONDS=10
 ARG FULL_SCAN_INTERVAL_DAYS=7
 ARG OCR_ENABLED=True
 ARG OCR_MIN_TEXT_CHARS=20
-ARG OCR_DPI=300
-ARG OCR_LANG=eng
 ARG OCR_MAX_PAGES=9999
+ARG MARKER_MODE=fast
+ARG MARKER_DEVICE=
+ARG MARKER_MODEL_CACHE=
 
 ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION} \
@@ -106,9 +109,10 @@ ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS} \
     OCR_ENABLED=${OCR_ENABLED} \
     OCR_MIN_TEXT_CHARS=${OCR_MIN_TEXT_CHARS} \
-    OCR_DPI=${OCR_DPI} \
-    OCR_LANG=${OCR_LANG} \
-    OCR_MAX_PAGES=${OCR_MAX_PAGES}
+    OCR_MAX_PAGES=${OCR_MAX_PAGES} \
+    MARKER_MODE=${MARKER_MODE} \
+    MARKER_DEVICE=${MARKER_DEVICE} \
+    MARKER_MODEL_CACHE=${MARKER_MODEL_CACHE}
 
 # Network access is not guaranteed at runtime: bake the embedding/reranker
 # models and the tiktoken BPE data into the image. Only the files the download

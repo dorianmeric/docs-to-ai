@@ -30,6 +30,45 @@ def download_tokenizer():
         log_warn(explain(e, context="tokenizer download"), component="Download")
 
 
+def download_marker_models():
+    """
+    Pre-cache the Marker models used for scanned PDFs.
+
+    Marker is optional, so this only runs when it is installed. In the Docker
+    build it bakes the models into the image, which keeps the running container
+    from downloading them on the first scan.
+    """
+    from .config import MARKER_MODE
+    try:
+        import marker  # noqa: F401
+    except ImportError:
+        log_info(
+            "Marker is not installed (optional extra), so scanned PDFs cannot be read. "
+            "Install it with 'uv sync --extra marker'. (optional)",
+            component="Download",
+        )
+        return
+
+    log_info(f"Downloading and caching the Marker models (MARKER_MODE={MARKER_MODE})", component="Download")
+    try:
+        from .ocr import ocr_status
+        available, detail = ocr_status()
+        if not available:
+            log_warn(detail, component="Download")
+            return
+        from marker.models import create_model_dict
+        local_only = MARKER_MODE in ("fast", "no_ocr")
+        create_model_dict(load_indra=local_only, no_server=local_only)
+        log_success(f"Successfully cached the Marker models ({detail})", component="Download")
+    except Exception as e:
+        log_warn(explain(e, context="marker model download"), component="Download")
+        log_warn(
+            "Scanned PDFs stay empty until the Marker models can be downloaded. Retry with network "
+            "access, or set OCR_ENABLED=False to skip OCR entirely.",
+            component="Download",
+        )
+
+
 def download_models():
     """
     Downloads and caches the sentence transformer and cross-encoder models.
@@ -62,6 +101,7 @@ def download_models():
         log_info("Using custom EMBEDDING_QUERY_PROMPT for search queries", component="Download")
 
     download_tokenizer()
+    download_marker_models()
 
     if USE_RERANKER:
         log_info("Downloading and caching re-ranker model...", component="Download")
