@@ -27,12 +27,14 @@ from app.scan_all_my_documents import scan_all
 # call itself ("maximum recursion depth exceeded").
 from app.mcp_tools import (
     search_documents as _search_documents,
-    list_documents as _list_documents,
+    list_all_documents as _list_all_documents,
+    list_topic as _list_topic,
     list_topics as _list_topics,
     get_collection_stats as _get_collection_stats,
-    get_document as _get_document,
-    get_document_metadata as _get_document_metadata,
-    get_document_file as _get_document_file,
+    read_file as _read_file,
+    read_file_metadata as _read_file_metadata,
+    read_file_raw as _read_file_raw,
+    read_multiple_files as _read_multiple_files,
     scan_all_my_documents as _scan_all_my_documents,
     start_watching_folder as _start_watching_folder,
     stop_watching_folder as _stop_watching_folder,
@@ -123,42 +125,67 @@ def search_documents(query: str, max_results: int = 10, topic: str | None = None
 
 
 @mcp.tool()
-def list_documents(topic: str | None = None) -> str:
-    """Get a list of all available documents with their hierarchical topics."""
-    return _list_documents(topic)
+def list_all_documents(topic: str | None = None) -> str:
+    """Get a list of all available documents with their hierarchical topics.
+
+    Args:
+        topic: Optional: filter to show only documents that have this topic
+    """
+    return _list_all_documents(topic)
 
 
 @mcp.tool()
-def get_document_metadata(document: str) -> str:
+def list_topic(topic: str) -> str:
+    """List every document in one topic (folder), including its sub-folders, with full paths.
+
+    Args:
+        topic: Topic or folder path, like 'legal', 'legal > contracts', or 'legal/contracts'
+    """
+    return _list_topic(topic)
+
+
+@mcp.tool()
+def read_file_metadata(document: str) -> str:
     """Get the metadata of one indexed document: dates, size, topics, chunk count.
 
     Args:
-        document: Filename, path, or part of either, as returned by list_documents
+        document: Filename, path, or part of either, as returned by list_all_documents
     """
-    return _get_document_metadata(document)
+    return _read_file_metadata(document)
 
 
 @mcp.tool()
-def get_document(document: str, page: int | None = None, max_chars: int = 0) -> str:
+def read_file(document: str, page: int | None = None, max_chars: int = 0) -> str:
     """Get one document in full, with its metadata.
 
     Args:
-        document: Filename, path, or part of either, as returned by list_documents
+        document: Filename, path, or part of either, as returned by list_all_documents
         page: Optional: return only this page (1-based)
         max_chars: Optional: cut the text after this many characters (0 = no limit)
     """
-    return _get_document(document, page, max_chars)
+    return _read_file(document, page, max_chars)
 
 
 @mcp.tool()
-def get_document_file(document: str, max_bytes: int = 1_000_000) -> str:
+def read_multiple_files(files: list[str], max_chars: int = 0) -> str:
+    """Get several documents at once as a JSON list, each with its metadata and text.
+
+    Args:
+        files: Filenames, paths, or parts of either, as returned by list_all_documents
+        max_chars: Optional: cut each document's text after this many characters (0 = no limit)
+    """
+    return _read_multiple_files(files, max_chars)
+
+
+@mcp.tool()
+def read_file_raw(document: str, max_bytes: int = 1_000_000) -> str:
     """Get the original document file as base64, with its metadata.
 
     Args:
-        document: Filename, path, or part of either, as returned by list_documents
+        document: Filename, path, or part of either, as returned by list_all_documents
         max_bytes: Refuse files larger than this (default 1 MB)
     """
-    return _get_document_file(document, max_bytes)
+    return _read_file_raw(document, max_bytes)
 
 
 @mcp.tool()

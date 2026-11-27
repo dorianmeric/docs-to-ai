@@ -27,7 +27,7 @@ if ($LASTEXITCODE -eq 0) {
 
 
    # docker-compose up -d
-    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d # for GPU support
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d # for GPU(Nvidia) support in the docker container
 
 
     

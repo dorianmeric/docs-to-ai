@@ -9,6 +9,7 @@ from .logging_utils import log_error, log_info, log_warn
 import base64
 import contextvars
 import hashlib
+import json
 import mimetypes
 import os
 import threading
@@ -304,8 +305,8 @@ def search_documents(
         response_parts.append(f"\nContent:\n{result['text']}")
 
     response_parts.append(
-        "\nTip: call 'get_document' with one of these file names to read that document in full, "
-        "or 'get_document_file' to get the original file."
+        "\nTip: call 'read_file' with one of these file names to read that document in full, "
+        "'read_multiple_files' to read several at once, or 'read_file_raw' to get the original file."
     )
     response = "\n".join(response_parts)
     trace['format_ms'] = round((time.perf_counter() - format_started) * 1000, 2)
@@ -315,7 +316,7 @@ def search_documents(
 
 @friendly_errors
 @logged_tool
-def list_documents(topic: Optional[str] = None) -> str:
+def list_all_documents(topic: Optional[str] = None) -> str:
     """Get a list of all available documents with their hierarchical topics.
 
     Args:
@@ -375,6 +376,113 @@ def list_documents(topic: Optional[str] = None) -> str:
             response_parts.append(f"    Topics: {topics_display}")
 
     return "\n".join(response_parts)
+
+
+def _doc_topics(doc: Dict[str, Any]) -> List[str]:
+    """The topic path of one indexed document, as a list of folder names."""
+    topics = doc.get('topics') or ['uncategorized']
+    if isinstance(topics, str):
+        topics = [topics]
+    return [str(topic) for topic in topics]
+
+
+def _topic_parts(topic: str) -> List[str]:
+    """Split 'legal > contracts', 'legal/contracts', or 'legal' into folder parts."""
+    text = str(topic or '').strip()
+    if not text:
+        return []
+    if TOPIC_SEPARATOR.strip() and TOPIC_SEPARATOR in text:
+        parts = text.split(TOPIC_SEPARATOR)
+    elif '/' in text or '\\' in text:
+        parts = text.replace('\\', '/').split('/')
+    elif '>' in text:
+        parts = text.split('>')
+    else:
+        parts = [text]
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _topic_matches(doc_topics: List[str], wanted: List[str]) -> bool:
+    """True when a document's folder path is the wanted topic or sits under it."""
+    doc_parts = [_normalise(part) for part in doc_topics]
+    wanted_parts = [_normalise(part) for part in wanted]
+    return doc_parts[:len(wanted_parts)] == wanted_parts
+
+
+def _topic_matches_anywhere(doc_topics: List[str], wanted: List[str]) -> bool:
+    """True when the wanted folder path appears at any depth of a document's path."""
+    doc_parts = [_normalise(part) for part in doc_topics]
+    wanted_parts = [_normalise(part) for part in wanted]
+    span = len(wanted_parts)
+    return any(doc_parts[index:index + span] == wanted_parts for index in range(len(doc_parts)))
+
+
+@friendly_errors
+@logged_tool
+def list_topic(topic: str) -> str:
+    """List every document in one topic (folder), including its sub-folders, with full paths.
+
+    Args:
+        topic: Topic or folder path, like 'legal', 'legal > contracts', or 'legal/contracts'
+    """
+    wanted = _topic_parts(topic)
+    if not wanted:
+        return format_message(
+            "An empty topic was given.",
+            cause="The topic argument was blank, so no folder could be looked up.",
+            fix="Pass a folder name, for example list_topic('legal'). Call 'list_topics' to see "
+                "every indexed topic.",
+        )
+
+    vector_store = VectorStore()
+    documents = vector_store.list_documents()
+    if not documents:
+        return format_message(
+            "No documents are indexed yet.",
+            cause="Nothing has been scanned into the vector store.",
+            fix="Run the 'scan_all_my_documents' tool first.",
+        )
+
+    matched = [doc for doc in documents if _topic_matches(_doc_topics(doc), wanted)]
+    note = ""
+    if not matched:
+        # 'contracts' should still find 'legal > contracts'
+        matched = [doc for doc in documents if _topic_matches_anywhere(_doc_topics(doc), wanted)]
+        if matched:
+            note = " (matched a folder at any level of the path)"
+
+    if not matched:
+        needle = _normalise(wanted[-1])
+        near = [name for name in vector_store.list_topics() if needle in _normalise(name)]
+        hint = f" Closest topics: {', '.join(near[:10])}." if near else ""
+        return format_message(
+            f"No documents are in topic '{topic}'.",
+            cause="No folder with that name holds indexed documents.",
+            fix="Call 'list_topics' to see the folder names, or 'list_all_documents' for "
+                f"everything.{hint}",
+        )
+
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for doc in matched:
+        topic_path = TOPIC_SEPARATOR.join(_doc_topics(doc)) or 'uncategorized'
+        groups.setdefault(topic_path, []).append(doc)
+
+    lines = [
+        f"Documents in topic '{topic}'{note}, including sub-folders: {len(matched)} total "
+        f"across {len(groups)} topic path{'s' if len(groups) != 1 else ''}",
+    ]
+    for topic_path in sorted(groups):
+        topic_docs = sorted(groups[topic_path], key=lambda item: str(item.get('filename', '')).lower())
+        lines.append("")
+        lines.append(f"{topic_path} ({len(topic_docs)} document{'s' if len(topic_docs) != 1 else ''})")
+        for doc in topic_docs:
+            lines.append(
+                f"  - {doc.get('filename', 'Unknown')} ({doc.get('filetype', '')}) - "
+                f"Size: {_format_file_size(doc.get('file_size', 0))}, "
+                f"Modified: {_format_timestamp(doc.get('last_modified', 0))}"
+            )
+            lines.append(f"    Path: {doc.get('filepath', '')}")
+    return "\n".join(lines)
 
 
 # Base64 inflates a file by a third and every MCP client caps a tool response, so
@@ -478,7 +586,7 @@ def _document_pages(vector_store, doc: Dict[str, Any]) -> Tuple[List[Dict[str, A
             fallback_reason = "source file produced no text"
         except Exception as exc:
             # A broken or unsupported file must not hide the text that is indexed
-            log_warn(f"Could not re-read {path.name} for get_document: {exc}", component="MCP")
+            log_warn(f"Could not re-read {path.name} for read_file: {exc}", component="MCP")
             fallback_reason = f"source file could not be read ({type(exc).__name__})"
 
     # Source file gone or unreadable: rebuild the text from the stored chunks
@@ -497,6 +605,39 @@ def _document_pages(vector_store, doc: Dict[str, Any]) -> Tuple[List[Dict[str, A
         for page, texts in sorted(pages_map.items())
     ]
     return pages, f"indexed chunks ({fallback_reason})"
+
+
+def _document_body(vector_store, doc: Dict[str, Any], page: Optional[int] = None,
+                   max_chars: int = 0) -> Dict[str, Any]:
+    """The text body of one document, plus where it came from and how much was cut."""
+    pages, source = _document_pages(vector_store, doc)
+    available = [item['page'] for item in pages]
+
+    if page is not None:
+        pages = [item for item in pages if item['page'] == page]
+
+    body_parts = []
+    for item in pages:
+        # The extractor sets 'ocr'; pages read from the document cache carry it
+        # on their metadata instead
+        is_ocr = item.get('ocr') or (item.get('metadata') or {}).get('is_ocr')
+        marker = " (OCR)" if is_ocr else ""
+        body_parts.append(f"--- Page {item['page']}{marker} ---\n{item['text']}")
+    body = "\n\n".join(body_parts)
+
+    total_chars = len(body)
+    truncated = bool(max_chars and total_chars > max_chars)
+    if truncated:
+        body = body[:max_chars] + f"\n...[{total_chars - max_chars} chars cut, call again with max_chars=0 for all]"
+
+    return {
+        'body': body,
+        'source': source,
+        'total_chars': total_chars,
+        'truncated': truncated,
+        'found': bool(pages) or page is None,
+        'pages_with_chunks': available,
+    }
 
 
 def _document_overview(vector_store, doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -545,9 +686,15 @@ def _document_overview(vector_store, doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _resolve_document(vector_store, document: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """Find the one document the caller means, or the text that explains why not."""
-    documents = vector_store.list_documents()
+def _resolve_document(vector_store, document: str,
+                      documents: Optional[List[Dict[str, Any]]] = None
+                      ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Find the one document the caller means, or the text that explains why not.
+
+    ``documents`` lets a caller that resolves many names reuse one listing of the index.
+    """
+    if documents is None:
+        documents = vector_store.list_documents()
     if not documents:
         return None, format_message(
             "No documents are indexed yet.",
@@ -570,7 +717,8 @@ def _resolve_document(vector_store, document: str) -> Tuple[Optional[Dict[str, A
     return None, format_message(
         f"No indexed document matches '{document}'.",
         cause="The name is different, or the document was never scanned.",
-        fix="Call 'list_documents' and copy a filename from there, then run this tool again.",
+        fix="Call 'list_all_documents' (or 'list_topic') and copy a filename from there, then run "
+            "this tool again.",
     )
 
 
@@ -617,11 +765,11 @@ def _overview_text(overview: Dict[str, Any]) -> List[str]:
 
 @friendly_errors
 @logged_tool
-def get_document_metadata(document: str) -> str:
+def read_file_metadata(document: str) -> str:
     """Return the metadata of one indexed document: dates, size, topics, chunk count.
 
     Args:
-        document: Filename, path, or part of either, as returned by list_documents
+        document: Filename, path, or part of either, as returned by list_all_documents
     """
     vector_store = VectorStore()
     match, problem = _resolve_document(vector_store, document)
@@ -633,11 +781,11 @@ def get_document_metadata(document: str) -> str:
 
 @friendly_errors
 @logged_tool
-def get_document(document: str, page: Optional[int] = None, max_chars: int = 0) -> str:
+def read_file(document: str, page: Optional[int] = None, max_chars: int = 0) -> str:
     """Return one document in full, with its metadata.
 
     Args:
-        document: Filename, path, or part of either, as returned by list_documents
+        document: Filename, path, or part of either, as returned by list_all_documents
         page: Optional: return only this page (1-based)
         max_chars: Optional: cut the text after this many characters (0 = no limit)
     """
@@ -647,47 +795,32 @@ def get_document(document: str, page: Optional[int] = None, max_chars: int = 0) 
         return problem
 
     overview = _document_overview(vector_store, match)
-    pages, source = _document_pages(vector_store, match)
+    content = _document_body(vector_store, match, page, max_chars)
 
-    if page is not None:
-        pages = [item for item in pages if item['page'] == page]
-        if not pages:
-            return format_message(
-                f"Page {page} does not exist in '{match['filename']}'.",
-                cause="The page number is outside the document.",
-                fix=f"Valid pages: {_page_list(overview['pages_with_chunks'])}. Call the tool again "
-                    "without the page argument to get everything.",
-            )
-
-    body_parts = []
-    for item in pages:
-        # The extractor sets 'ocr'; pages read from the document cache carry it
-        # on their metadata instead
-        is_ocr = item.get('ocr') or (item.get('metadata') or {}).get('is_ocr')
-        marker = " (OCR)" if is_ocr else ""
-        body_parts.append(f"--- Page {item['page']}{marker} ---\n{item['text']}")
-    body = "\n\n".join(body_parts)
-
-    total_chars = len(body)
-    if max_chars and total_chars > max_chars:
-        body = body[:max_chars] + f"\n...[{total_chars - max_chars} chars cut, call again with max_chars=0 for all]"
+    if not content['found']:
+        return format_message(
+            f"Page {page} does not exist in '{match['filename']}'.",
+            cause="The page number is outside the document.",
+            fix=f"Valid pages: {_page_list(content['pages_with_chunks'])}. Call the tool again "
+                "without the page argument to get everything.",
+        )
 
     lines = _overview_text(overview)
-    lines.append(f"Text source: {source}")
-    lines.append(f"Characters returned: {len(body)} of {total_chars}")
+    lines.append(f"Text source: {content['source']}")
+    lines.append(f"Characters returned: {len(content['body'])} of {content['total_chars']}")
     lines.append("")
     lines.append("--- Text ---")
-    lines.append(body)
+    lines.append(content['body'])
     return "\n".join(lines)
 
 
 @friendly_errors
 @logged_tool
-def get_document_file(document: str, max_bytes: int = DEFAULT_MAX_FILE_BYTES) -> str:
+def read_file_raw(document: str, max_bytes: int = DEFAULT_MAX_FILE_BYTES) -> str:
     """Return the original document file as base64, with its metadata.
 
     Args:
-        document: Filename, path, or part of either, as returned by list_documents
+        document: Filename, path, or part of either, as returned by list_all_documents
         max_bytes: Refuse files larger than this (default 1 MB, raise it to get a bigger file)
     """
     vector_store = VectorStore()
@@ -700,7 +833,7 @@ def get_document_file(document: str, max_bytes: int = DEFAULT_MAX_FILE_BYTES) ->
         return format_message(
             f"The file for '{match['filename']}' is not on disk any more.",
             cause="The document was moved or deleted after it was indexed.",
-            fix="Restore the file next to the mounted documents folder and re-scan, or use 'get_document' "
+            fix="Restore the file next to the mounted documents folder and re-scan, or use 'read_file' "
                 "to read the text that is still indexed.",
         )
 
@@ -709,7 +842,7 @@ def get_document_file(document: str, max_bytes: int = DEFAULT_MAX_FILE_BYTES) ->
         return format_message(
             f"'{match['filename']}' is {_human_size(size)}, above the {_human_size(max_bytes)} limit.",
             cause="Large binary files are not returned in one tool response by default.",
-            fix=f"Call the tool again with max_bytes={size} to get the whole file, or use 'get_document' "
+            fix=f"Call the tool again with max_bytes={size} to get the whole file, or use 'read_file' "
                 "to read the extracted text instead.",
         )
 
@@ -726,6 +859,56 @@ def get_document_file(document: str, max_bytes: int = DEFAULT_MAX_FILE_BYTES) ->
     lines.append("--- Base64 ---")
     lines.append(base64.b64encode(data).decode('ascii'))
     return "\n".join(lines)
+
+
+@friendly_errors
+@logged_tool
+def read_multiple_files(files: List[str], max_chars: int = 0) -> str:
+    """Return several documents at once as a JSON list, each with its metadata and text.
+
+    Args:
+        files: Filenames, paths, or parts of either, as returned by list_all_documents
+        max_chars: Optional: cut each document's text after this many characters (0 = no limit)
+    """
+    if not files:
+        return format_message(
+            "No file names were given.",
+            cause="The files list was empty.",
+            fix="Pass at least one name, for example "
+                "read_multiple_files(['contract.docx', 'terms.pdf']).",
+        )
+
+    vector_store = VectorStore()
+    documents = vector_store.list_documents()
+    entries: List[Dict[str, Any]] = []
+
+    for name in files:
+        match, problem = _resolve_document(vector_store, name, documents)
+        if problem:
+            # One missing or ambiguous name must not hide the files that did resolve
+            entries.append({'document': name, 'error': problem})
+            continue
+
+        overview = _document_overview(vector_store, match)
+        content = _document_body(vector_store, match, None, max_chars)
+        metadata = dict(overview)
+        metadata.update({
+            'text_source': content['source'],
+            'chars_returned': len(content['body']),
+            'chars_total': content['total_chars'],
+            'truncated': content['truncated'],
+        })
+        entries.append({
+            'document': name,
+            'filename': match.get('filename'),
+            'path': match.get('filepath'),
+            'metadata': metadata,
+            'text': content['body'],
+        })
+
+    returned = sum(1 for entry in entries if 'error' not in entry)
+    log_detail("read_multiple_files", files_requested=len(files), files_returned=returned)
+    return json.dumps(entries, indent=2, ensure_ascii=False, default=str)
 
 
 @friendly_errors

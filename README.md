@@ -459,17 +459,19 @@ Rough guide for the vector store: 1 GB per 30,000 chunks, so 10,000 documents of
 Search and discovery:
 
 - `search_documents` runs hybrid search over all documents. Filters: `topic`, `phrase_search`, `date_from`, `date_to`, `regex_pattern`.
-- `list_documents` lists indexed documents. Filter with `topic`.
+- `list_all_documents` lists every indexed document, grouped by first topic. Filter with `topic`.
+- `list_topic` lists the documents of one topic (folder), including its sub-folders, with the full path of each file. Accepts `legal`, `legal > contracts`, or `legal/contracts`, and falls back to matching the folder name at any depth.
 - `list_topics` lists topics.
 - `get_collection_stats` reports chunk counts, document counts, file types, and index details.
 
-Read one document in full:
+Read documents in full:
 
-- `get_document_metadata` returns one document's metadata: path, topics, type, size, created and last-modified dates, chunk count, page numbers with chunks, OCR pages, and whether the file changed on disk since the last scan.
-- `get_document` returns one document's whole text, page by page, with the same metadata block. Use `page` to read a single page and `max_chars` to cap the response. The text is re-read from the source file, so it is complete even when the chunks are split; if the file is gone, the text is rebuilt from the indexed chunks and the response says so.
-- `get_document_file` returns the original file itself as a base64 string, with MIME type, byte count, and SHA-256, so the client can save or forward the real PDF, DOCX, or image. `max_bytes` defaults to 1 MB because base64 inflates a file by a third; raise it to fetch something bigger.
+- `read_file_metadata` returns one document's metadata: path, topics, type, size, created and last-modified dates, chunk count, page numbers with chunks, OCR pages, and whether the file changed on disk since the last scan.
+- `read_file` returns one document's whole text, page by page, with the same metadata block. Use `page` to read a single page and `max_chars` to cap the response. The text is re-read from the source file, so it is complete even when the chunks are split; if the file is gone, the text is rebuilt from the indexed chunks and the response says so.
+- `read_multiple_files` takes a list of names and returns the same metadata and text for each one as a JSON list. `max_chars` caps the text of each file. A name that does not resolve comes back as an entry with an `error` field, so one miss does not hide the rest.
+- `read_file_raw` returns the original file itself as a base64 string, with MIME type, byte count, and SHA-256, so the client can save or forward the real PDF, DOCX, or image. `max_bytes` defaults to 1 MB because base64 inflates a file by a third; raise it to fetch something bigger.
 
-All three take the same `document` argument: a filename, a full path, or part of either, as shown by `list_documents`. If a name matches more than one document, the tool answers with the candidates instead of guessing.
+All four take the same document names: a filename, a full path, or part of either, as shown by `list_all_documents` or `list_topic`. If a name matches more than one document, the tool answers with the candidates instead of guessing.
 
 Document management:
 
@@ -492,11 +494,12 @@ Read a whole document:
 - "Show me the full text of the UzKor K-sure policy."
 - "How big is the Commercial Terms Agreement, and when was it last changed?"
 - "Send me the actual Investment Agency Agreement file."
+- "Read the Commercial Terms Agreement and the Investment Agency Agreement together."
 
 Search my folder by topic:
 
 - "Search the Python_Programming topic for decorators."
-- "List all documents under Machine_Learning."
+- "List all documents under Machine_Learning, including sub-folders."
 - "Find data visualization notes in Data_Science."
 
 Narrow a search with filters:
@@ -555,7 +558,7 @@ Token counts come from tiktoken, not from the embedding model tokenizer. Counts 
 
 ### OCR for scanned PDFs
 
-A scanned PDF stores a picture of each page, not text. Text extraction finds nothing, and the page would be indexed empty. When a page's text layer holds fewer than `OCR_MIN_TEXT_CHARS` characters, that page is read by [Marker](https://github.com/datalab-to/marker) (datalab-to/marker), which does layout analysis before OCR, so multi-column scans, tables, and forms come back in reading order. The recognised text is indexed like any other text, and each chunk records that it came from OCR, so results and `get_document` mark those pages `(OCR)`.
+A scanned PDF stores a picture of each page, not text. Text extraction finds nothing, and the page would be indexed empty. When a page's text layer holds fewer than `OCR_MIN_TEXT_CHARS` characters, that page is read by [Marker](https://github.com/datalab-to/marker) (datalab-to/marker), which does layout analysis before OCR, so multi-column scans, tables, and forms come back in reading order. The recognised text is indexed like any other text, and each chunk records that it came from OCR, so results and `read_file` mark those pages `(OCR)`.
 
 Marker is an optional dependency because it brings its own PyTorch build and models:
 
@@ -589,7 +592,7 @@ How it behaves:
 - Only pages that need it are read. A PDF with a text layer costs nothing extra, and a mixed PDF hands Marker just its scanned pages (Marker's `page_range`).
 - Blank pages are skipped. A page with no image and no drawing has nothing to read.
 - Every scanned page is read by default: `OCR_MAX_PAGES=9999` is no practical limit. The setting stays as a ceiling for pathological files. When a document hits it, the log says how many pages were left. `OCR_MAX_PAGES=0` turns OCR off.
-- OCR runs once per document. The extracted text lands in `cache/doc_cache`, so later scans and `get_document` reuse it.
+- OCR runs once per document. The extracted text lands in `cache/doc_cache`, so later scans and `read_file` reuse it.
 - Turning OCR on, or changing `MARKER_MODE`, `OCR_MIN_TEXT_CHARS`, or `OCR_MAX_PAGES`, makes the cached text of PDFs stale. The next scan re-reads those PDFs, so previously empty scans fill in. Other file types keep their cached text.
 - `MARKER_MODE=balanced` or `vllm` without `vllm` or a `llama-server` binary is reported at startup instead of failing mid-scan.
 - Models live in the Hugging Face cache (about 110 MB for `fast`). Set `MARKER_MODEL_CACHE` to keep them on a mounted volume, or bake them into a Docker image by building with `INSTALL_MARKER=True`.
@@ -1076,7 +1079,7 @@ Start the folder watcher. Changed files are re-indexed after `DEBOUNCE_SECONDS`.
 
 Chunks keep queries precise and keep contexts small. Each chunk carries its file path, page number, and topic. The LLM reads the chunk and cites the file.
 
-When the whole document is needed, `get_document` returns its full text and `get_document_file` returns the original file as base64.
+When the whole document is needed, `read_file` returns its full text and `read_file_raw` returns the original file as base64.
 
 ## License
 
