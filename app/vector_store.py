@@ -566,7 +566,7 @@ class VectorStore:
         # Get all documents
         try:
             all_docs = self.collection.get()
-        except Exception as e: # if the collection is not found
+        except Exception:  # collection missing or unreadable: report no documents
             return []
         
         # Extract unique documents (by filepath)

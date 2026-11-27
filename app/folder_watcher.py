@@ -368,6 +368,10 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
         # Override: Force scan if database is empty, even if FULL_SCAN_ON_BOOT is False
         if not should_scan:
             try:
+                # Imported here so importing the watcher module stays cheap, and so
+                # a broken vector store degrades to "keep the configured setting"
+                # instead of breaking the module import.
+                from .vector_store import VectorStore
                 vector_store = VectorStore()
                 doc_count = vector_store.collection.count()
                 if doc_count == 0:
@@ -376,9 +380,13 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
                 else:
                     print(f"[FolderWatcher] Database has {doc_count} chunks - skipping initial scan", file=sys.stderr)
             except Exception as e:
-                print(f"[FolderWatcher] Warning: Could not check database state: {e}", file=sys.stderr)
-                # If we can't check, follow the configured setting
-                pass
+                from .errors import explain
+                print(
+                    "[FolderWatcher] Warning: could not check whether the index is empty. "
+                    "The initial scan follows FULL_SCAN_ON_BOOT instead.",
+                    file=sys.stderr
+                )
+                print(explain(e, context="folder watcher database check"), file=sys.stderr)
         
         # Perform the scan if needed
         if should_scan:

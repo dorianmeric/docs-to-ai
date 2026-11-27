@@ -573,6 +573,8 @@ The server explains each failure in three parts: what happened, the likely cause
 | `The folder watcher could not start for '<path>'.` | The folder is missing or unreadable, or `watchdog` is not installed. | Create the folder and check `DOCS_DIR`. Run `uv sync`. Then call `start_watching_folder` again. |
 | `Cached text for '<file>' is unreadable.` | A cache entry was truncated, for example by a crash. | No action needed. The scan re-extracts the file and rewrites the cache entry. |
 | `Compute device: cpu (no GPU detected)` in the log | PyTorch has no CUDA device: CPU-only wheel, or no driver. | Install a CUDA wheel: `uv pip install --index-url https://download.pytorch.org/whl/cu128 torch`. |
+| `Error calling tool '<name>': maximum recursion depth exceeded` | An older build registered each MCP tool under the same name it imported, so the tool called itself. The current source imports the implementations under private names. | Rebuild the container with the current source: `docker compose build --no-cache`. |
+| `[FolderWatcher] Warning: Could not check database state: name 'VectorStore' is not defined` | Older build: the watcher used the vector store without importing it, so the empty-index check failed. The watcher still ran; the initial scan followed `FULL_SCAN_ON_BOOT`. | Rebuild the container with the current source. |
 
 Every message also ends with a hint pointing at this section. Copy the `Details:` line when you report a bug.
 

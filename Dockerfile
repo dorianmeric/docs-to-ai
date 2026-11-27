@@ -97,14 +97,17 @@ ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     DEBOUNCE_SECONDS=${DEBOUNCE_SECONDS} \
     FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS}
 
-# Copy application code
+# Network access is not guaranteed at runtime: bake the embedding/reranker
+# models and the tiktoken BPE data into the image. Only the files the download
+# needs are copied first, so editing the app code does not invalidate this
+# (large) layer and force a re-download on every rebuild.
+ENV TIKTOKEN_CACHE_DIR=/app/.tiktoken_cache
+COPY app/config.py app/errors.py app/download_models.py /app/app/
+RUN uv run python -m app.download_models
+
+# Copy the rest of the application code
 COPY app/ /app/app/
 COPY mcp_server.py /app/
-
-# Network access is not guaranteed at runtime: bake the embedding/reranker
-# models and the tiktoken BPE data into the image
-ENV TIKTOKEN_CACHE_DIR=/app/.tiktoken_cache
-RUN uv run python -m app.download_models
 
 # Expose HTTP port
 EXPOSE 38777

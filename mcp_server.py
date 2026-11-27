@@ -20,15 +20,18 @@ from app.folder_watcher import (
 )
 from app.incremental_updater import process_incremental_changes
 from app.scan_all_my_documents import scan_all
+# Import the implementations under private names. The @mcp.tool() functions below
+# reuse the public tool names, so importing them unprefixed would make every tool
+# call itself ("maximum recursion depth exceeded").
 from app.mcp_tools import (
-    search_documents,
-    list_documents,
-    list_topics,
-    get_collection_stats,
-    scan_all_my_documents,
-    start_watching_folder,
-    stop_watching_folder,
-    get_time_of_last_folder_scan
+    search_documents as _search_documents,
+    list_documents as _list_documents,
+    list_topics as _list_topics,
+    get_collection_stats as _get_collection_stats,
+    scan_all_my_documents as _scan_all_my_documents,
+    start_watching_folder as _start_watching_folder,
+    stop_watching_folder as _stop_watching_folder,
+    get_time_of_last_folder_scan as _get_time_of_last_folder_scan
 )
 from app.config import (
     FULL_SCAN_ON_BOOT,
@@ -94,49 +97,49 @@ def search_documents(query: str, max_results: int = 10, topic: str | None = None
         date_to: Optional: Filter to documents modified before this timestamp
         regex_pattern: Optional: Filter results by regex pattern in text content
     """
-    return search_documents(query, max_results, topic, phrase_search, date_from, date_to, regex_pattern)
+    return _search_documents(query, max_results, topic, phrase_search, date_from, date_to, regex_pattern)
 
 
 @mcp.tool()
 def list_documents(topic: str | None = None) -> str:
     """Get a list of all available documents with their hierarchical topics."""
-    return list_documents(topic)
+    return _list_documents(topic)
 
 
 @mcp.tool()
 def list_topics() -> str:
     """Get a list of all topics/categories in the document collection."""
-    return list_topics()
+    return _list_topics()
 
 
 @mcp.tool()
 def get_collection_stats() -> str:
     """Get statistics about the document collection."""
-    return get_collection_stats()
+    return _get_collection_stats()
 
 
 @mcp.tool()
 def scan_all_my_documents() -> str:
     """Scan all documents in the docs directory and update the vector database."""
-    return scan_all_my_documents()
+    return _scan_all_my_documents()
 
 
 @mcp.tool()
 def start_watching_folder() -> str:
     """Start watching the documents folder for changes."""
-    return start_watching_folder()
+    return _start_watching_folder()
 
 
 @mcp.tool()
 def stop_watching_folder() -> str:
     """Stop watching the folder for changes."""
-    return stop_watching_folder()
+    return _stop_watching_folder()
 
 
 @mcp.tool()
 def get_time_of_last_folder_scan() -> str:
     """Get the timestamp of when the last folder scan was started and finished."""
-    return get_time_of_last_folder_scan()
+    return _get_time_of_last_folder_scan()
 
 
 async def main():
