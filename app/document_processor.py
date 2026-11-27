@@ -31,11 +31,72 @@ except ImportError:
     TIKTOKEN_AVAILABLE = False
 
 
+_ENCODINGS: Dict[str, Any] = {}
+_ENCODING_FAILURES = 0
+_ENCODING_MAX_FAILURES = 3
+# Rough English/code ratio used when tiktoken data cannot be fetched (e.g. the
+# container runs offline and the BPE files were not baked into the image).
+CHARS_PER_TOKEN = 4
+
+
+def _get_encoding():
+    """Return the configured tiktoken encoding, or None when unavailable.
+
+    tiktoken fetches its BPE data on first use, which can fail on an offline
+    machine. Loading is retried a few times before the process gives up, so a
+    transient failure does not silently change chunk sizing for its lifetime.
+    """
+    global _ENCODING_FAILURES
+    if TOKENIZER_MODEL in _ENCODINGS:
+        return _ENCODINGS[TOKENIZER_MODEL]
+    if not TIKTOKEN_AVAILABLE or _ENCODING_FAILURES >= _ENCODING_MAX_FAILURES:
+        return None
+    try:
+        _ENCODINGS[TOKENIZER_MODEL] = tiktoken.get_encoding(TOKENIZER_MODEL)
+    except Exception as e:
+        _ENCODING_FAILURES += 1
+        if _ENCODING_FAILURES >= _ENCODING_MAX_FAILURES:
+            print(
+                f"WARNING: tokenizer '{TOKENIZER_MODEL}' could not be loaded after "
+                f"{_ENCODING_FAILURES} attempts ({e}). Token counts are now estimated "
+                f"at {CHARS_PER_TOKEN} characters per token; run "
+                "'python -m app.download_models' (or mount TIKTOKEN_CACHE_DIR) to "
+                "cache the tokenizer data.",
+                file=sys.stderr
+            )
+        return None
+    _ENCODING_FAILURES = 0
+    return _ENCODINGS[TOKENIZER_MODEL]
+
+
+def token_count(text: str) -> int:
+    """Number of tokens in ``text`` (estimated when tiktoken is unavailable)."""
+    if not text:
+        return 0
+    encoding = _get_encoding()
+    if encoding is None:
+        return max(1, len(text) // CHARS_PER_TOKEN)
+    return len(encoding.encode(text, disallowed_special=()))
+
+
 class DocumentProcessor:
     """Handles document text extraction and chunking for PDFs and Word documents."""
     
     def __init__(self):
         self.cache_dir = DOC_CACHE_DIR
+        # Chunk sizes are measured in tokens (the 512-1024 token sweet spot)
+        # when token chunking is enabled, and in characters otherwise.
+        self.token_units = CHUNK_BY_TOKEN or CHUNKING_STRATEGY == 'by_token'
+
+    def _measure(self, text: str) -> int:
+        """Length of ``text`` in the configured unit (tokens or characters).
+
+        The unit never changes with tokenizer availability: in token mode a
+        missing tokenizer yields an estimate, so chunks stay the same size.
+        """
+        if self.token_units:
+            return token_count(text)
+        return len(text)
     
     def extract_topics_from_path(self, doc_path: Path, base_dir: Optional[Path] = None) -> List[str]:
         """
@@ -159,13 +220,8 @@ class DocumentProcessor:
     
     def _create_chunk(self, text: str, metadata: Dict[str, Any], page_num: int, chunk_index: int) -> Dict[str, Any]:
         """Helper to create a chunk dictionary with a unique ID."""
-        topics_str = '-'.join(metadata['topics'])
-        chunk_id = hashlib.md5(
-            f"{topics_str}-{metadata['filepath']}-{page_num}-{chunk_index}".encode()
-        ).hexdigest()
-        
         return {
-            'id': chunk_id,
+            'id': self._chunk_id(metadata, page_num, chunk_index),
             'text': text,
             'metadata': {
                 **metadata,
@@ -174,15 +230,54 @@ class DocumentProcessor:
             }
         }
 
+    @staticmethod
+    def _chunk_id(metadata: Dict[str, Any], page_num: int, chunk_index: int) -> str:
+        """Stable chunk ID derived from topic path, file, page and position."""
+        topics_str = '-'.join(metadata.get('topics') or ['uncategorized'])
+        return hashlib.md5(
+            f"{topics_str}-{metadata['filepath']}-{page_num}-{chunk_index}".encode()
+        ).hexdigest()
+
+    def _renumber(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Give a page's chunks sequential indexes (and therefore stable IDs)."""
+        for index, chunk in enumerate(chunks):
+            metadata = chunk['metadata']
+            metadata['chunk_index'] = index
+            chunk['id'] = self._chunk_id(metadata, metadata['page'], index)
+        return chunks
+
     def _chunk_with_fixed_size(self, text: str, metadata: Dict[str, Any], page_num: int) -> List[Dict[str, Any]]:
-        """Split text into fixed-size chunks with overlap."""
+        """Split text into fixed-size chunks, measured in the configured unit."""
+        if not self.token_units:
+            return self._chunk_char_fixed(text, metadata, page_num)
+        if _get_encoding() is None:
+            return self._chunk_by_estimated_tokens(text, metadata, page_num)
+        return self._chunk_by_token(text, metadata, page_num)
+
+    def _chunk_by_estimated_tokens(self, text: str, metadata: Dict[str, Any],
+                                   page_num: int) -> List[Dict[str, Any]]:
+        """Token chunking without a tokenizer: slice at CHARS_PER_TOKEN chars/token."""
+        return self._chunk_char_fixed(
+            text, metadata, page_num,
+            size=max(1, CHUNK_SIZE * CHARS_PER_TOKEN),
+            overlap=max(0, CHUNK_OVERLAP * CHARS_PER_TOKEN),
+        )
+
+    def _chunk_char_fixed(self, text: str, metadata: Dict[str, Any], page_num: int,
+                          size: Optional[int] = None,
+                          overlap: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Split text into fixed-size character chunks with overlap."""
         chunks = []
         if not text.strip():
             return []
 
-        for i in range(0, len(text), CHUNK_SIZE - CHUNK_OVERLAP):
-            chunk_text = text[i:i + CHUNK_SIZE]
-            if len(chunk_text.strip()) < 50:
+        size = CHUNK_SIZE if size is None else size
+        overlap = CHUNK_OVERLAP if overlap is None else overlap
+        step = max(1, size - overlap)
+
+        for i in range(0, len(text), step):
+            chunk_text = text[i:i + size]
+            if self._measure(chunk_text) < MIN_CHUNK_SIZE:
                 continue
             
             chunk = self._create_chunk(chunk_text, metadata, page_num, i)
@@ -200,38 +295,40 @@ class DocumentProcessor:
 
         paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
         
-        current_chunk = ""
+        current_parts: List[str] = []
+        current_size = 0
         chunk_index = 0
-        for i, p in enumerate(paragraphs):
-            # If a paragraph is larger than the chunk size, split it
-            if len(p) > CHUNK_SIZE:
-                if current_chunk:
-                    chunks.append(self._create_chunk(current_chunk, metadata, page_num, chunk_index))
-                    chunk_index += 1
-                    current_chunk = ""
-                
-                # Split the large paragraph
+
+        def flush():
+            """Emit the paragraphs accumulated so far as one chunk."""
+            nonlocal current_parts, current_size, chunk_index
+            if not current_parts:
+                return
+            chunks.append(self._create_chunk('\n'.join(current_parts), metadata, page_num, chunk_index))
+            chunk_index += 1
+            current_parts = []
+            current_size = 0
+
+        for p in paragraphs:
+            p_size = self._measure(p)
+
+            # A paragraph larger than the target size is split on its own
+            if p_size > CHUNK_SIZE:
+                flush()
                 sub_chunks = self._chunk_with_fixed_size(p, metadata, page_num)
                 chunks.extend(sub_chunks)
                 chunk_index += len(sub_chunks)
                 continue
 
-            # Check if adding the next paragraph exceeds chunk size
-            if len(current_chunk) + len(p) + 1 > CHUNK_SIZE:
-                if current_chunk:
-                    chunks.append(self._create_chunk(current_chunk, metadata, page_num, chunk_index))
-                    chunk_index += 1
-                current_chunk = p
-            else:
-                if current_chunk:
-                    current_chunk += "\n" + p
-                else:
-                    current_chunk = p
-        
-        # Add the last remaining chunk
-        if current_chunk:
-            chunks.append(self._create_chunk(current_chunk, metadata, page_num, chunk_index))
-            
+            # Adding this paragraph would overflow the chunk: start a new one
+            if current_parts and current_size + p_size > CHUNK_SIZE:
+                flush()
+
+            current_parts.append(p)
+            current_size += p_size
+
+        flush()
+
         return chunks
 
     def _chunk_by_token(self, text: str, metadata: Dict[str, Any], page_num: int) -> List[Dict[str, Any]]:
@@ -239,22 +336,19 @@ class DocumentProcessor:
         chunks = []
         if not text.strip():
             return []
+
+        enc = _get_encoding()
+        if enc is None:
+            return self._chunk_by_estimated_tokens(text, metadata, page_num)
         
-        if not TIKTOKEN_AVAILABLE:
-            return self._chunk_with_fixed_size(text, metadata, page_num)
-        
-        try:
-            enc = tiktoken.get_encoding(TOKENIZER_MODEL)
-        except KeyError:
-            enc = tiktoken.get_encoding("cl100k_base")
-        
-        tokens = enc.encode(text)
-        
-        for i in range(0, len(tokens), CHUNK_SIZE - CHUNK_OVERLAP):
+        tokens = enc.encode(text, disallowed_special=())
+        step = max(1, CHUNK_SIZE - CHUNK_OVERLAP)
+
+        for i in range(0, len(tokens), step):
             chunk_tokens = tokens[i:i + CHUNK_SIZE]
             chunk_text = enc.decode(chunk_tokens)
             
-            if len(chunk_text.strip()) < MIN_CHUNK_SIZE:
+            if token_count(chunk_text) < MIN_CHUNK_SIZE:
                 continue
             
             chunk = self._create_chunk(chunk_text, metadata, page_num, i)
@@ -298,9 +392,15 @@ class DocumentProcessor:
         sentences = self._split_sentences(text)
         if not sentences:
             return []
+
+        # Semantic chunk bounds are always expressed in tokens (512-1024 is the
+        # practical sweet spot before retrieval quality drops off)
+        max_size = max(1, SEMANTIC_CHUNK_MAX_SIZE)
+        min_size = max(0, SEMANTIC_CHUNK_MIN_SIZE)
+
         if len(sentences) == 1:
             # Single sentence: emit directly, or hard-split if it exceeds the max size
-            if len(sentences[0]) <= SEMANTIC_CHUNK_MAX_SIZE:
+            if token_count(sentences[0]) <= max_size:
                 chunk = self._create_chunk(sentences[0], metadata, page_num, 0)
                 chunk['metadata']['is_semantic_chunk'] = True
                 return [chunk]
@@ -308,11 +408,9 @@ class DocumentProcessor:
 
         try:
             import numpy as np
-            from .embeddings import get_embedding_model
+            from .embeddings import encode_passages
 
-            model = get_embedding_model()
-            embeddings = model.encode(sentences, show_progress_bar=False, normalize_embeddings=True)
-            embeddings = np.asarray(embeddings)
+            embeddings = np.asarray(encode_passages(sentences))
 
             # Combine each sentence with its neighbours to smooth the signal
             buffer = max(0, SEMANTIC_CHUNK_BUFFER_SIZE)
@@ -354,22 +452,23 @@ class DocumentProcessor:
             current_len = 0
 
         for i, sentence in enumerate(sentences):
-            sentence_len = len(sentence)
+            sentence_len = token_count(sentence)
             # Hard split if adding this sentence would exceed the max size
-            if current and current_len + sentence_len + 1 > SEMANTIC_CHUNK_MAX_SIZE:
+            if current and current_len + sentence_len > max_size:
                 flush()
             current.append(sentence)
-            current_len += sentence_len + 1
+            current_len += sentence_len
             # Soft split at a detected semantic boundary once the min size is met
-            if i + 1 in split_indices and current_len >= SEMANTIC_CHUNK_MIN_SIZE:
+            if i + 1 in split_indices and current_len >= min_size:
                 flush()
 
         flush()
 
         # Merge any trailing chunk that is too small into the previous one
-        if len(chunks) > 1 and len(chunks[-1]['text']) < SEMANTIC_CHUNK_MIN_SIZE:
+        if len(chunks) > 1 and token_count(chunks[-1]['text']) < min_size:
             tail = chunks.pop()
-            chunks[-1]['text'] = chunks[-1]['text'] + ' ' + tail['text']
+            merged = chunks[-1]['text'] + ' ' + tail['text']
+            chunks[-1]['text'] = merged
 
         return chunks
 
@@ -425,7 +524,7 @@ class DocumentProcessor:
             if not section_text.strip():
                 continue
             
-            if len(section_text) <= MAX_HEADING_CHUNK_SIZE:
+            if self._measure(section_text) <= MAX_HEADING_CHUNK_SIZE:
                 chunk = self._create_chunk(section_text, metadata, page_num, chunk_index)
                 chunk['metadata']['heading'] = heading
                 chunk['metadata']['heading_level'] = section['level']
@@ -462,18 +561,26 @@ class DocumentProcessor:
             metadata = page_data['metadata']
             page_num = page_data['page']
 
+            # Explicit strategies always win; PRESERVE_HEADINGS only decides how
+            # the remaining (legacy) fixed-size path behaves.
             if CHUNKING_STRATEGY == 'semantic':
                 chunks = self._chunk_semantic(text, metadata, page_num)
             elif CHUNKING_STRATEGY == 'by_paragraph':
                 chunks = self._chunk_by_paragraph(text, metadata, page_num)
-            elif CHUNKING_STRATEGY == 'semantic_heading' or (PRESERVE_HEADINGS and CHUNKING_STRATEGY != 'by_token'):
+            elif CHUNKING_STRATEGY == 'by_token':
+                chunks = self._chunk_by_token(text, metadata, page_num)
+            elif CHUNKING_STRATEGY == 'semantic_heading':
+                chunks = self._chunk_by_heading(text, metadata, page_num)
+            elif CHUNKING_STRATEGY == 'fixed_size':
+                chunks = self._chunk_with_fixed_size(text, metadata, page_num)
+            elif PRESERVE_HEADINGS:
                 chunks = self._chunk_by_heading(text, metadata, page_num)
             elif use_token_chunking:
                 chunks = self._chunk_by_token(text, metadata, page_num)
             else:
                 chunks = self._chunk_with_fixed_size(text, metadata, page_num)
             
-            all_chunks.extend(chunks)
+            all_chunks.extend(self._renumber(chunks))
             
         return all_chunks
     

@@ -13,6 +13,7 @@ from app.vector_store import VectorStore
 from app.config import (
     DEFAULT_SEARCH_RESULTS,
     MAX_SEARCH_RESULTS,
+    CHROMA_SPACE,
     TOPIC_SEPARATOR,
     FULL_SCAN_ON_BOOT,
     FOLDER_WATCHER_ACTIVE_ON_BOOT
@@ -128,9 +129,14 @@ def search_documents(
         response_parts.append(f"Topics: {topics_display}")
         response_parts.append(f"Source: {filename} ({filetype}) [Page {page}]")
 
-        if result.get('distance') is not None:
-            relevance = max(0, 100 - (result['distance'] * 100))
-            response_parts.append(f"Relevance: {relevance:.1f}%")
+        # ChromaDB returns 1 - cosine similarity only in cosine space
+        distance = result.get('distance')
+        if distance is not None:
+            if CHROMA_SPACE == 'cosine':
+                relevance = max(0.0, min(100.0, (1.0 - distance) * 100))
+                response_parts.append(f"Relevance: {relevance:.1f}%")
+            else:
+                response_parts.append(f"Distance ({CHROMA_SPACE}): {distance:.4f}")
 
         response_parts.append(f"\nContent:\n{result['text']}")
 
@@ -225,7 +231,14 @@ def get_collection_stats() -> str:
     response += f"Total chunks: {stats['total_chunks']}\n"
     response += f"Total documents: {stats['total_documents']}\n"
     response += f"Total topics: {stats['total_topics']}\n"
-    response += f"Collection: {stats['collection_name']}\n\n"
+    response += f"Collection: {stats['collection_name']}\n"
+    response += f"Embedding model: {stats.get('embedding_model', 'unknown')} "
+    response += f"({stats.get('embedding_dimension', 'unknown')}-dim, {stats.get('distance_space', 'l2')})\n"
+    retrieval = "hybrid (BM25 + dense, RRF)" if stats.get('hybrid_search') else "dense only"
+    response += f"Retrieval: {retrieval}\n"
+    if stats.get('reranker'):
+        response += f"Re-ranker: {stats['reranker']}\n"
+    response += "\n"
 
     if 'documents_per_filetype' in stats and stats['documents_per_filetype']:
         response += "Documents per file type:\n"
