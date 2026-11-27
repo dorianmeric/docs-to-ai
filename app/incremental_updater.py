@@ -9,6 +9,7 @@ from .vector_store import VectorStore
 from .logging_utils import log_info
 from .config import TOPIC_SEPARATOR
 from .errors import explain, format_inline
+from .log_config import log_detail
 import time
 import sys
 
@@ -53,6 +54,7 @@ class IncrementalUpdater:
         
         for action, filepath in changes:
             file_path = Path(filepath)
+            change_started = time.perf_counter()
             
             try:
                 if action == 'delete':
@@ -89,11 +91,30 @@ class IncrementalUpdater:
                             'chunks': result['chunks_added'],
                             'topics': result.get('topics', [])
                         })
+                        log_detail(
+                            "incremental_change",
+                            action=action,
+                            file=file_path.name,
+                            path=str(file_path),
+                            chunks=result['chunks_added'],
+                            topics=result.get('topics', []),
+                            ok=True,
+                            duration_ms=round((time.perf_counter() - change_started) * 1000, 2),
+                        )
                     else:
                         stats['failed'] += 1
 
             except Exception as e:
                 self.debug_messages.append(f"  ✗ Error processing {action} for {file_path}: {e}")
+                log_detail(
+                    "incremental_change",
+                    action=action,
+                    file=file_path.name,
+                    path=str(file_path),
+                    ok=False,
+                    error=f"{type(e).__name__}: {e}",
+                    duration_ms=round((time.perf_counter() - change_started) * 1000, 2),
+                )
                 stats['failed'] += 1
                 stats['files_processed'].append({
                     'action': f'{action}_failed',

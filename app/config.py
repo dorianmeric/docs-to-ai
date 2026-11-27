@@ -174,6 +174,18 @@ CHROMA_SPACE = _env_str('CHROMA_SPACE', 'cosine').lower()  # cosine | l2 | ip
 HNSW_EF_SEARCH = _env_int('HNSW_EF_SEARCH', 200)  # Query-time candidate list size (ChromaDB default is 100)
 HNSW_EF_CONSTRUCTION = _env_int('HNSW_EF_CONSTRUCTION', 200)  # Build-time candidate list size
 
+# Logging Configuration
+# One folder holds the rotating server log and the structured detail log. In
+# Docker it is bind-mounted, so the files land on the host.
+LOG_DIR = Path(os.getenv('LOG_DIR', str(BASE_DIR / "logs")))
+LOG_DIR.mkdir(exist_ok=True, parents=True)
+LOG_LEVEL = _env_str('LOG_LEVEL', 'INFO').upper()  # DEBUG, INFO, WARNING, ERROR
+LOG_CONSOLE = _env_bool('LOG_CONSOLE', True)  # also write log lines to stderr
+LOG_MAX_BYTES = _env_int('LOG_MAX_BYTES', 10 * 1024 * 1024)  # rotate a file after this size
+LOG_BACKUP_COUNT = _env_int('LOG_BACKUP_COUNT', 5)  # rotated files kept per log
+LOG_DETAIL_ENABLED = _env_bool('LOG_DETAIL_ENABLED', True)  # queries, chunks, scan detail as JSON Lines
+LOG_CHUNK_TEXT_CHARS = _env_int('LOG_CHUNK_TEXT_CHARS', 2000)  # chunk text stored per result, 0 = no text
+
 # MCP Server Startup Configuration
 # Controls whether a full scan should be performed when the MCP server starts
 FULL_SCAN_ON_BOOT = _env_bool('FULL_SCAN_ON_BOOT', False)

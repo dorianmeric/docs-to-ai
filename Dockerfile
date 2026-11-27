@@ -102,7 +102,7 @@ ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
 # needs are copied first, so editing the app code does not invalidate this
 # (large) layer and force a re-download on every rebuild.
 ENV TIKTOKEN_CACHE_DIR=/app/.tiktoken_cache
-COPY app/config.py app/errors.py app/logging_utils.py app/download_models.py /app/app/
+COPY app/config.py app/errors.py app/logging_utils.py app/log_config.py app/download_models.py /app/app/
 RUN uv run python -m app.download_models
 
 # Copy the rest of the application code

@@ -5,18 +5,21 @@ This module contains all the tool function definitions that are exposed
 via the MCP protocol.
 """
 
-from .logging_utils import log_error
+from .logging_utils import log_error, log_info
 import time
 import sys
-from typing import Optional
+from functools import wraps
+from typing import Any, Dict, Optional
 
 from app.errors import explain, format_message, friendly_errors
+from app.log_config import log_detail, truncate
 from app.vector_store import VectorStore
 from app.config import (
     DOCS_DIR as CONFIGURED_DOCS_DIR,
     DEFAULT_SEARCH_RESULTS,
     MAX_SEARCH_RESULTS,
     CHROMA_SPACE,
+    LOG_CHUNK_TEXT_CHARS,
     TOPIC_SEPARATOR,
     FULL_SCAN_ON_BOOT,
     FOLDER_WATCHER_ACTIVE_ON_BOOT
@@ -38,6 +41,54 @@ from app.scan_scheduler import is_scan_in_progress
 DOCS_DIR = str(CONFIGURED_DOCS_DIR)
 
 
+def logged_tool(func):
+    """Record every tool call in server.log and detail.jsonl, with its duration."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs) -> Any:
+        started = time.perf_counter()
+        call_args = {name: value for name, value in zip(func.__code__.co_varnames, args)}
+        call_args.update(kwargs)
+
+        def duration_ms() -> float:
+            return round((time.perf_counter() - started) * 1000, 2)
+
+        try:
+            result = func(*args, **kwargs)
+        except Exception as exc:
+            log_detail("tool_call", tool=func.__name__, args=call_args, ok=False,
+                       error=f"{type(exc).__name__}: {exc}", duration_ms=duration_ms())
+            raise
+
+        text = str(result)
+        log_info(f"Tool {func.__name__} finished in {duration_ms()} ms", component="MCP")
+        log_detail("tool_call", tool=func.__name__, args=call_args, ok=True,
+                   duration_ms=duration_ms(), result_chars=len(text))
+        return result
+
+    return wrapper
+
+
+def _chunk_record(rank: int, result: Dict[str, Any]) -> Dict[str, Any]:
+    """One returned chunk as it goes into the detail log."""
+    metadata = result.get('metadata', {})
+    text = result.get('text', '')
+    return {
+        'rank': rank,
+        'chunk_id': result.get('id'),
+        'file': metadata.get('filename'),
+        'path': metadata.get('filepath'),
+        'page': metadata.get('page'),
+        'topics': metadata.get('topics'),
+        'chunk_index': metadata.get('chunk_index'),
+        'cosine_distance': result.get('distance'),
+        'rrf_score': result.get('rrf_score'),
+        'rerank_score': result.get('relevance_score'),
+        'chars': len(text),
+        'text': truncate(text, LOG_CHUNK_TEXT_CHARS),
+    }
+
+
 def _format_file_size(size_in_bytes: int) -> str:
     """Helper to format file size."""
     if size_in_bytes > 1024 * 1024:
@@ -56,6 +107,7 @@ def _format_timestamp(timestamp: float) -> str:
 
 
 @friendly_errors
+@logged_tool
 def search_documents(
     query: str,
     max_results: int = DEFAULT_SEARCH_RESULTS,
@@ -81,7 +133,31 @@ def search_documents(
     """
     vector_store = VectorStore()
 
+    search_started = time.perf_counter()
+    trace: Dict[str, Any] = {
+        'query': query,
+        'query_chars': len(query),
+        'topic': topic,
+        'max_results': max_results,
+        'phrase_search': phrase_search,
+        'date_from': date_from,
+        'date_to': date_to,
+        'regex_pattern': regex_pattern,
+        'index_size': vector_store.collection.count(),
+    }
+
+    def log_search(outcome: str, results: list) -> None:
+        trace['outcome'] = outcome
+        trace['results'] = [_chunk_record(rank, item) for rank, item in enumerate(results, 1)]
+        trace['duration_ms'] = round((time.perf_counter() - search_started) * 1000, 2)
+        log_detail("search", **trace)
+        log_info(
+            f"Search '{query[:60]}' -> {outcome}, {len(results)} chunk(s) in {trace['duration_ms']} ms",
+            component="MCP",
+        )
+
     if vector_store.collection.count() == 0:
+        log_search("empty_index", [])
         return format_message(
             f"The index is empty, so '{query}' could not match anything.",
             cause="No documents have been indexed yet, or the last scan failed.",
@@ -90,6 +166,7 @@ def search_documents(
         )
 
     max_results = min(max(1, max_results), MAX_SEARCH_RESULTS)
+    trace['max_results'] = max_results
 
     search_limit = max_results * 3 if topic or phrase_search or regex_pattern else max_results
     results = vector_store.search(
@@ -98,7 +175,8 @@ def search_documents(
         phrase_search=phrase_search,
         date_from=date_from,
         date_to=date_to,
-        regex_pattern=regex_pattern
+        regex_pattern=regex_pattern,
+        trace=trace,
     )
 
     if topic:
@@ -110,8 +188,10 @@ def search_documents(
             if topic in doc_topics:
                 filtered_results.append(r)
         results = filtered_results[:max_results]
+        trace['after_topic_filter'] = len(results)
 
     if not results:
+        log_search("no_results", [])
         filter_msg = f" with topic '{topic}'" if topic else ""
         return format_message(
             f"No results found for query: '{query}'{filter_msg}.",
@@ -119,6 +199,8 @@ def search_documents(
             fix="Try fewer or different words. Call 'list_topics' to check the topic filter. Drop the date, "
                 "phrase, or regex filter to widen the search.",
         )
+
+    log_search("ok", results)
 
     filter_parts = []
     if topic:
@@ -164,6 +246,7 @@ def search_documents(
 
 
 @friendly_errors
+@logged_tool
 def list_documents(topic: Optional[str] = None) -> str:
     """Get a list of all available documents with their hierarchical topics.
 
@@ -227,6 +310,7 @@ def list_documents(topic: Optional[str] = None) -> str:
 
 
 @friendly_errors
+@logged_tool
 def list_topics() -> str:
     """Get a list of all topics/categories in the document collection."""
     vector_store = VectorStore()
@@ -255,6 +339,7 @@ def list_topics() -> str:
 
 
 @friendly_errors
+@logged_tool
 def get_collection_stats() -> str:
     """Get statistics about the document collection."""
     vector_store = VectorStore()
@@ -303,6 +388,7 @@ def get_collection_stats() -> str:
 
 
 @friendly_errors
+@logged_tool
 def scan_all_my_documents() -> str:
     """Scan all documents in the docs directory and update the vector database."""
     # A second scan would reset the index while the first one is still writing
@@ -324,6 +410,7 @@ def scan_all_my_documents() -> str:
 
 
 @friendly_errors
+@logged_tool
 def start_watching_folder() -> str:
     """Start watching the documents folder for changes and automatically trigger incremental updates."""
     try:
@@ -369,6 +456,7 @@ def start_watching_folder() -> str:
 
 
 @friendly_errors
+@logged_tool
 def stop_watching_folder() -> str:
     """Stop watching the folder for changes."""
     try:
@@ -389,6 +477,7 @@ def stop_watching_folder() -> str:
 
 
 @friendly_errors
+@logged_tool
 def get_time_of_last_folder_scan() -> str:
     """Get the timestamp of when the last folder scan was started and finished."""
     try:

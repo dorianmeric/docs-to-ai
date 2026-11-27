@@ -12,6 +12,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 from .logging_utils import log_error
+from .log_config import log_detail
 from .config import (
     DEBOUNCE_SECONDS,
     SUPPORTED_EXTENSIONS,
@@ -196,6 +197,13 @@ class IncrementalChangeHandler(FileSystemEventHandler):
         
         if not deduplicated_changes:
             return
+
+        log_detail(
+            "watch_batch",
+            changes=[{"action": action, "file": Path(filepath).name, "path": filepath}
+                     for action, filepath in deduplicated_changes],
+            count=len(deduplicated_changes),
+        )
         
         try:
             self.callback(deduplicated_changes, incremental=True)

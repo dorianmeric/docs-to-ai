@@ -8,8 +8,12 @@ Every log line looks like this:
     2026-11-27 20:45:14 WARN    ⚠️ [FolderWatcher] No supported documents in /app/my-docs
     2026-11-27 20:45:15 ERROR   ❌ [VectorStore] The vector database could not be opened
 
-All output goes to stderr. stdout carries the MCP protocol and the CLI reports
-(`--help`, `--show-config`, scan reports), so stdout must stay clean.
+Lines go to stderr and, once :func:`app.log_config.setup_logging` ran, also to
+the rotating file ``<LOG_DIR>/server.log``. stdout carries the MCP protocol and
+the CLI reports (`--help`, `--show-config`, scan reports), so stdout stays clean.
+
+Detail records (queries, chunks, scans) go to ``<LOG_DIR>/detail.jsonl`` through
+:func:`app.log_config.log_detail`.
 
 Use:
 
@@ -19,9 +23,11 @@ Use:
     log_error(explain(exc), component="VectorStore")
 """
 
-import sys
+import logging
 from datetime import datetime
 from typing import Optional
+
+from .log_config import SERVER_LOGGER, setup_logging
 
 LEVEL_INFO = "INFO"
 LEVEL_SUCCESS = "SUCCESS"
@@ -39,8 +45,19 @@ EMOJI = {
 _LEVEL_WIDTH = len(LEVEL_SUCCESS)
 
 
+def _level_number(level: str) -> int:
+    return {
+        LEVEL_INFO: logging.INFO,
+        LEVEL_SUCCESS: logging.INFO,
+        LEVEL_WARN: logging.WARNING,
+        LEVEL_ERROR: logging.ERROR,
+    }.get(level, logging.INFO)
+
+
 def log(level: str, message: str, component: Optional[str] = None) -> None:
-    """Write one log line to stderr: timestamp, level, emoji, component, message."""
+    """Write one log line: timestamp, level, emoji, component, message."""
+    setup_logging()  # idempotent; keeps CLI callers working without extra setup
+
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     tag = f"[{component}] " if component else ""
     emoji = EMOJI.get(level, "")
@@ -50,13 +67,12 @@ def log(level: str, message: str, component: Optional[str] = None) -> None:
     lines = str(message).splitlines() or [""]
     first = f"{stamp} {level:<{_LEVEL_WIDTH}} {emoji_field}{tag}{lines[0]}"
     if len(lines) == 1:
-        print(first, file=sys.stderr, flush=True)
-        return
+        text = first
+    else:
+        padding = " " * (len(stamp) + 1 + _LEVEL_WIDTH + 1 + (len(emoji_field) + len(tag)))
+        text = "\n".join([first] + [f"{padding}{line}" for line in lines[1:]])
 
-    print(first, file=sys.stderr)
-    padding = " " * (len(stamp) + 1 + _LEVEL_WIDTH + 1 + (len(emoji_field) + len(tag)))
-    for line in lines[1:]:
-        print(f"{padding}{line}", file=sys.stderr, flush=True)
+    logging.getLogger(SERVER_LOGGER).log(_level_number(level), text)
 
 
 def log_info(message: str, component: Optional[str] = None) -> None:

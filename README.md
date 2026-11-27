@@ -27,6 +27,8 @@ Supported extensions: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb
 - [Retrieval pipeline](#retrieval-pipeline)
 - [Production RAG settings](#production-rag-settings)
 - [Logs](#logs)
+  - [Log files](#log-files)
+  - [Reading the detail log](#reading-the-detail-log)
 - [Troubleshooting: error messages](#troubleshooting-error-messages)
 - [FAQ: search files and PDFs locally](#faq-search-files-and-pdfs-locally)
 - [License](#license)
@@ -657,6 +659,112 @@ Every line the server writes to stderr starts with a timestamp, a level, and an 
 Multi-line messages (scan reports, error explanations) are indented under their first line. `grep ERROR` finds the whole block by its first line.
 
 stdout stays clean. stdout carries the MCP protocol and the CLI reports (`--help`, `--show-config`, scan reports). Log lines never go to stdout, so they cannot corrupt the MCP stream.
+
+### Log files
+
+Two files sit in `logs/` (`/app/logs` in Docker, bind-mounted to `./logs` on the host):
+
+| File | Content |
+|---|---|
+| `logs/server.log` | Every action of the server: startup, model loading, watcher events, scans, tool calls, searches, errors |
+| `logs/detail.jsonl` | One JSON object per line for the events needed to debug retrieval: `server_start`, `tool_call`, `search`, `scan_document`, `scan_summary`, `incremental_change`, `watch_batch` |
+
+Both files rotate by size. A full file is renamed to `.1`, `.2`, and so on. The oldest file beyond `LOG_BACKUP_COUNT` is deleted.
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| Log dir | `LOG_DIR` | `logs` | Folder for both files. Docker uses `/app/logs` |
+| Level | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
+| Console | `LOG_CONSOLE` | `True` | Also print to stderr, which `docker logs` shows |
+| Max size | `LOG_MAX_BYTES` | `10485760` | Rotate a file after 10 MB |
+| Backups | `LOG_BACKUP_COUNT` | `5` | Rotated files kept per log |
+| Detail log | `LOG_DETAIL_ENABLED` | `True` | Write `detail.jsonl` |
+| Chunk text | `LOG_CHUNK_TEXT_CHARS` | `2000` | Chunk text stored per result, `0` stores none |
+
+Docker writes the files to the host because `docker-compose.yml` mounts `./logs` and sets `LOG_DIR=/app/logs`:
+
+```yaml
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - LOG_DIR=/app/logs
+```
+
+### Reading the detail log
+
+One `search` record answers "why did the LLM get these chunks?". The record holds the query and the filters. The record holds the candidate count and the timing for every stage. The record holds every returned chunk, with its scores and text.
+
+```json
+{
+  "ts": "2026-11-27T14:17:59.120",
+  "event": "search",
+  "query": "turkey hsr termination rights",
+  "topic": null,
+  "max_results": 5,
+  "index_size": 514,
+  "mode": "hybrid",
+  "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+  "candidate_pool": 50,
+  "dense_candidates": 50,
+  "bm25_candidates": 31,
+  "fused_candidates": 50,
+  "sparse_only_candidates": 4,
+  "before_filters": 50,
+  "after_filters": 50,
+  "after_topic_filter": 5,
+  "reranked": 50,
+  "returned": 5,
+  "dense_ms": 180.6,
+  "bm25_ms": 105.8,
+  "total_ms": 1349.8,
+  "rerank_ms": 1056.1,
+  "outcome": "ok",
+  "results": [
+    {
+      "rank": 1,
+      "chunk_id": "50ae5b218c187f89c7e55ea361f3a1c6",
+      "file": "MUFG HSR 2 - Commercial Terms Agreement.md",
+      "page": 1,
+      "topics": ["Turkey HSR 2"],
+      "cosine_distance": 0.797,
+      "rrf_score": 0.0101,
+      "rerank_score": -9.32,
+      "chars": 5585,
+      "text": "..."
+    }
+  ]
+}
+```
+
+Useful queries (any JSON Lines tool works, `jq` below):
+
+```bash
+# every query the LLM sent, newest last
+jq -r 'select(.event=="search") | "\(.ts) \(.query) -> \(.returned)/\(.dense_candidates) dense, no BM25-only"' logs/detail.jsonl
+
+# slow searches (more than 500 ms)
+jq 'select(.event=="search" and .total_ms > 500) | {query, total_ms, rerank_ms}' logs/detail.jsonl
+
+# queries where BM25 found chunks the dense search missed
+jq 'select(.event=="search" and .sparse_only_candidates > 0) | {query, sparse_only_candidates}' logs/detail.jsonl
+
+# searches that returned nothing
+jq 'select(.event=="search" and .outcome != "ok")' logs/detail.jsonl
+
+# which files the answers came from
+jq -r 'select(.event=="search") | .results[] | .file' logs/detail.jsonl | sort | uniq -c | sort -rn
+
+# documents that failed to index
+jq 'select(.event=="scan_document" and .ok==false)' logs/detail.jsonl
+```
+
+What the numbers tell you:
+
+- `dense_candidates` far above `returned` with low `rerank_score` means the re-ranker disagreed with the vector search. Try a domain-specific `RERANKER_MODEL`, or `USE_RERANKER=False` to compare.
+- `sparse_only_candidates` above zero means BM25 rescued exact terms the vectors missed. Lower `BM25_WEIGHT` hides those; raise it.
+- `after_topic_filter` at zero means the `topic` filter removed everything. Check the exact topic with `list_topics`.
+- `rerank_ms` dominating `total_ms` means re-ranking is the bottleneck. Lower `RERANKER_TOP_N`, or run on a GPU.
+- `outcome: "empty_index"` means nothing was indexed yet.
 
 ## Troubleshooting: error messages
 

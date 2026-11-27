@@ -6,6 +6,7 @@ from sentence_transformers import CrossEncoder
 from typing import List, Dict, Optional, Any, Sequence
 import json
 import re
+import time
 from app.config import (
     CHROMADB_DIR, 
     CHROMA_COLLECTION_NAME, 
@@ -448,7 +449,8 @@ class VectorStore:
         phrase_search: bool = False,
         date_from: Optional[float] = None,
         date_to: Optional[float] = None,
-        regex_pattern: Optional[str] = None
+        regex_pattern: Optional[str] = None,
+        trace: Optional[Dict[str, Any]] = None,
     ) -> List[Dict]:
         """
         Search for relevant document chunks, with optional re-ranking.
@@ -460,21 +462,44 @@ class VectorStore:
             date_from: Filter results by minimum last_modified timestamp
             date_to: Filter results by maximum last_modified timestamp
             regex_pattern: Filter results by regex pattern in text
+            trace: Optional dict filled with retrieval diagnostics (candidate
+                counts per stage and per-stage timings) for the detail log.
             
         Returns:
             List of search results with text, metadata, and relevance scores
         """
+        trace = {} if trace is None else trace
+        started = time.perf_counter()
+
         # Wide candidate pool so the re-ranker (and RRF fusion) have room to work
         search_n_results = max(RERANKER_TOP_N if self.cross_encoder else n_results * 3, n_results)
+        trace.update({
+            'mode': 'hybrid' if self.bm25 is not None else 'dense',
+            'reranker': RERANKER_MODEL if self.cross_encoder else None,
+            'candidate_pool': search_n_results,
+            'requested_results': n_results,
+        })
 
+        dense_started = time.perf_counter()
         dense_results = self._dense_search(query, search_n_results)
+        trace['dense_candidates'] = len(dense_results)
+        trace['dense_ms'] = round((time.perf_counter() - dense_started) * 1000, 2)
         formatted_results = dense_results
 
         if self.bm25 is not None:
+            bm25_started = time.perf_counter()
             self._ensure_bm25()
             bm25_hits = [chunk_id for chunk_id, _score in self.bm25.search(query, search_n_results)]
+            trace['bm25_candidates'] = len(bm25_hits)
+            trace['bm25_ms'] = round((time.perf_counter() - bm25_started) * 1000, 2)
             if bm25_hits:
                 formatted_results = self._fuse_rrf(dense_results, bm25_hits, search_n_results)
+                trace['fused_candidates'] = len(formatted_results)
+                trace['sparse_only_candidates'] = len(
+                    {cid for cid in bm25_hits} - {r['id'] for r in dense_results}
+                )
+
+        trace['before_filters'] = len(formatted_results)
         
         if phrase_search:
             phrase_query = query.strip('"').lower()
@@ -506,8 +531,17 @@ class VectorStore:
             except re.error:
                 pass
         
+        trace['after_filters'] = len(formatted_results)
+        trace['filters'] = {
+            'phrase_search': bool(phrase_search),
+            'date_from': date_from,
+            'date_to': date_to,
+            'regex_pattern': regex_pattern,
+        }
+
         if self.cross_encoder and formatted_results:
             log_info(f"Re-ranking top {len(formatted_results)} results...", component="VectorStore")
+            rerank_started = time.perf_counter()
             
             pairs = [[query, result['text']] for result in formatted_results]
             
@@ -517,7 +551,11 @@ class VectorStore:
                 result['relevance_score'] = float(score)
                 
             formatted_results.sort(key=lambda x: x['relevance_score'], reverse=True)
+            trace['reranked'] = len(formatted_results)
+            trace['rerank_ms'] = round((time.perf_counter() - rerank_started) * 1000, 2)
 
+        trace['returned'] = min(len(formatted_results), n_results)
+        trace['total_ms'] = round((time.perf_counter() - started) * 1000, 2)
         return formatted_results[:n_results]
     
     def get_document(self, doc_id: str) -> Optional[Dict]:

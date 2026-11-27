@@ -6,9 +6,11 @@ from pathlib import Path
 from .document_processor import DocumentProcessor
 from .vector_store import VectorStore
 from .logging_utils import log_error, log_info, log_warn
+from .log_config import log_detail
 from .config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
 from .errors import DocsToAIError, explain, format_inline, format_message
 import sys
+import time
 
 def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
     """
@@ -26,6 +28,8 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
 
     # Force database reset regardless of parameter to prevent duplicate entries
     reset_database = True # Always reset when called, to avoid duplicates
+
+    scan_started = time.perf_counter()
 
     # Convert input to Path object for consistent path handling
     doc_path = Path(doc_dir)
@@ -181,6 +185,7 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
         response_parts.append(f"  Type: {ext}")
         response_parts.append(f"  Topics: {topics_display}")
         
+        file_started = time.perf_counter()
         try:
             # Process the document: extract text, split into chunks, add metadata
             chunks = processor.process_document(str(doc_file), str(doc_path))
@@ -206,6 +211,16 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
                 filetype_stats[ext]['chunks'] += num_added
 
                 response_parts.append(f"  ✓ Added {num_added} chunks")
+                log_detail(
+                    "scan_document",
+                    file=doc_file.name,
+                    path=str(doc_file),
+                    ext=ext,
+                    topics=topics,
+                    chunks=num_added,
+                    ok=True,
+                    duration_ms=round((time.perf_counter() - file_started) * 1000, 2),
+                )
             else:
                 # Document was read but yielded no text (empty file, image-only PDF, ..)
                 response_parts.append(
@@ -215,6 +230,17 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
                             "save a searchable PDF, then scan again.",
                     )
                 )
+                log_detail(
+                    "scan_document",
+                    file=doc_file.name,
+                    path=str(doc_file),
+                    ext=ext,
+                    topics=topics,
+                    chunks=0,
+                    ok=False,
+                    error="no text extracted",
+                    duration_ms=round((time.perf_counter() - file_started) * 1000, 2),
+                )
                 failed += 1
 
         except Exception as e:
@@ -222,6 +248,16 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
             response_parts.append(f"  ✗ Could not index {doc_file.name}")
             for line in explain(e).splitlines():
                 response_parts.append(f"    {line}")
+            log_detail(
+                "scan_document",
+                file=doc_file.name,
+                path=str(doc_file),
+                ext=ext,
+                topics=topics,
+                ok=False,
+                error=f"{type(e).__name__}: {e}",
+                duration_ms=round((time.perf_counter() - file_started) * 1000, 2),
+            )
             failed += 1
     
     # Print summary report of the ingestion process
@@ -247,6 +283,17 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
         for ext in sorted(filetype_stats.keys()):
             stats = filetype_stats[ext]
             response_parts.append(f"  {ext}: {stats['docs']} documents, {stats['chunks']} chunks")
+
+    log_detail(
+        "scan_summary",
+        documents=len(doc_files),
+        successful=successful,
+        failed=failed,
+        chunks_added=total_chunks,
+        topics=sorted(all_topics),
+        file_types=filetype_count,
+        duration_ms=round((time.perf_counter() - scan_started) * 1000, 2),
+    )
 
     # Query and display current vector store statistics
     response_parts.append(f"\nVector store stats:")

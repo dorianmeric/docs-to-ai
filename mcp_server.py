@@ -36,6 +36,7 @@ from app.mcp_tools import (
     get_time_of_last_folder_scan as _get_time_of_last_folder_scan
 )
 from app.logging_utils import log_error, log_info, log_success, log_warn
+from app.log_config import log_detail, setup_logging
 from app.config import (
     DOCS_DIR as CONFIGURED_DOCS_DIR,
     FULL_SCAN_ON_BOOT,
@@ -225,8 +226,35 @@ def _log_listen_addresses(host: str, port: int, mode: str) -> None:
     log_success("\n".join(lines), component="MCP Server")
 
 
+def _log_startup_detail(transport: str, host: str, port: int) -> None:
+    """Record the effective configuration once, so a log shows how the run started."""
+    from app.config import (
+        CHROMA_COLLECTION_NAME, CHUNKING_STRATEGY, EMBEDDING_MODEL, FOLDER_WATCHER_ACTIVE_ON_BOOT,
+        FULL_SCAN_ON_BOOT, LOG_CHUNK_TEXT_CHARS, LOG_DETAIL_ENABLED, LOG_DIR, RERANKER_MODEL,
+        USE_BM25, USE_RERANKER,
+    )
+    log_detail(
+        "server_start",
+        transport=transport,
+        host=host if transport != "stdio" else None,
+        port=port if transport != "stdio" else None,
+        docs_dir=DOCS_DIR,
+        collection=CHROMA_COLLECTION_NAME,
+        embedding_model=EMBEDDING_MODEL,
+        chunking_strategy=CHUNKING_STRATEGY,
+        hybrid_search=USE_BM25,
+        reranker=RERANKER_MODEL if USE_RERANKER else None,
+        full_scan_on_boot=FULL_SCAN_ON_BOOT,
+        folder_watcher=FOLDER_WATCHER_ACTIVE_ON_BOOT,
+        log_dir=str(LOG_DIR),
+        detail_log=LOG_DETAIL_ENABLED,
+        chunk_text_chars=LOG_CHUNK_TEXT_CHARS,
+    )
+
+
 async def main():
     """Main entry point - determine transport type from environment or arguments."""
+    setup_logging()
     transport = _transport_mode(os.getenv("MCP_TRANSPORT", "stdio"))
 
     if len(sys.argv) > 1:
@@ -368,6 +396,8 @@ async def main():
             i += 2
         else:
             i += 1
+
+    _log_startup_detail(transport, host, port)
 
     if transport in {"http", "sse"}:
         if _port_in_use(host, port):

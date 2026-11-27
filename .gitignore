@@ -62,3 +62,6 @@ docker-compose.override.yml
 # ChromaDB & doc cache
 cache/
 my-docs/
+# Logs (rotating server log + detail.jsonl)
+logs/*
+!logs/.gitkeep
