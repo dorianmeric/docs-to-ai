@@ -7,6 +7,7 @@ from typing import List, Tuple
 from .document_processor import DocumentProcessor
 from .vector_store import VectorStore
 from .config import TOPIC_SEPARATOR
+from .errors import explain, format_inline
 import time
 import sys
 
@@ -144,15 +145,18 @@ class IncrementalUpdater:
                 result['topics'] = topics
                 self.debug_messages.append(f"    ✓ Added {num_added} chunks")
             else:
-                self.debug_messages.append(f"    ⚠ No text extracted from {file_path.name}")
+                self.debug_messages.append(
+                    "    " + format_inline(
+                        f"No text could be extracted from '{file_path.name}'.",
+                        fix="Check that the file is not empty. A scanned PDF has no text layer: run OCR on it "
+                            "first, then scan again.",
+                    )
+                )
 
         except Exception as e:
-            self.debug_messages.append(f"    ✗ Error: {e}")
-            import traceback
-            import io
-            error_io = io.StringIO()
-            traceback.print_exc(file=error_io)
-            self.debug_messages.append(error_io.getvalue())
+            self.debug_messages.append(f"    ✗ Could not index {file_path.name}")
+            for line in explain(e).splitlines():
+                self.debug_messages.append(f"      {line}")
         
         return result
     
@@ -183,7 +187,9 @@ class IncrementalUpdater:
                 self.debug_messages.append(f"  ℹ No chunks found for {file_path.name} (may have already been deleted)")
 
         except Exception as e:
-            self.debug_messages.append(f"  ✗ Error deleting {file_path}: {e}")
+            self.debug_messages.append(f"  ✗ Could not delete {file_path.name} from the index")
+            for line in explain(e).splitlines():
+                self.debug_messages.append(f"    {line}")
         
         return result
     

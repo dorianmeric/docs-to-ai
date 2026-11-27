@@ -4,6 +4,32 @@ Docs-to-AI is a local RAG server. An LLM searches your documents through MCP and
 
 Supported extensions: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb`, `.md`, `.pptx`, `.html`, `.htm`, `.txt`, `.csv`
 
+**Contents**
+
+- [What you can do with it](#what-you-can-do-with-it)
+- [How search works](#how-search-works)
+- [Folder topics: how to search a folder](#folder-topics-how-to-search-a-folder)
+- [Install with local Python](#install-with-local-python)
+- [Install with Docker](#install-with-docker)
+- [Project structure](#project-structure)
+- [MCP tools](#mcp-tools)
+- [Example questions for the LLM](#example-questions-for-the-llm)
+- [Configuration](#configuration)
+  - [Chunking](#chunking)
+  - [Search](#search)
+  - [Embedding model](#embedding-model)
+  - [GPU acceleration](#gpu-acceleration)
+  - [Topics](#topics)
+  - [Storage](#storage)
+  - [Startup behaviour](#startup-behaviour)
+  - [Server transport](#server-transport)
+  - [Example `.env`](#example-env)
+- [Retrieval pipeline](#retrieval-pipeline)
+- [Production RAG settings](#production-rag-settings)
+- [Troubleshooting: error messages](#troubleshooting-error-messages)
+- [FAQ: search files and PDFs locally](#faq-search-files-and-pdfs-locally)
+- [License](#license)
+
 ## What you can do with it
 
 - Search local PDFs and other files with natural language.
@@ -504,6 +530,7 @@ Search output lists topic, source file, page, and a relevance percentage. The pe
 
 The settings below come from 2026 production RAG research. The marked settings are the current defaults.
 
+
 | # | Recommendation | Status | Why |
 |---|---|---|---|
 | 1 | Upgrade the embedding model. `all-MiniLM-L6-v2` is a prototyping model: 384-dim, 256-token context. | Done. Default is `Qwen/Qwen3-Embedding-0.6B`: 1024-dim, 32K context. `BAAI/bge-m3` also works. | Newer models retrieve better. MiniLM truncates long chunks at 256 tokens. |
@@ -518,6 +545,38 @@ The settings below come from 2026 production RAG research. The marked settings a
 | 10 | Apply metadata filters before re-ranking. | Optional. The `topic`, `date_from`, `date_to`, and `regex_pattern` filters run on fused candidates before re-ranking. | Filters shrink the candidate pool before scoring. |
 
 Not adopted: contextual retrieval and late chunking. Contextual retrieval runs about 120× slower at indexing. Neither gain is proven on small local corpora. Late chunking can hurt short passages.
+
+## Troubleshooting: error messages
+
+The server explains each failure in three parts: what happened, the likely cause, and the fix. The list below covers the messages users hit most.
+
+| Message you see | Cause | Fix |
+|---|---|---|
+| `The documents folder '<path>' does not exist.` | `DOCS_DIR` points at the wrong folder, or the folder is missing. | Create the folder. Set `DOCS_DIR` to it, or pass `--doc-dir <path>` to the scan. |
+| `The path '<path>' is a file, not a folder.` | `DOCS_DIR` points at one document. | Move the documents into a folder and point `DOCS_DIR` at that folder. |
+| `No supported documents were found in '<path>'.` | The folder is empty, or the files have unreadable extensions. | Add PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, or CSV files, then scan again. |
+| `The index is empty, so '<query>' could not match anything.` | Nothing is indexed yet, or the last scan failed. | Run the `scan_all_my_documents` tool, or `python -m app.scan_all_my_documents --doc-dir ./my-docs`. |
+| `No results found for query: '<query>'.` | The words are absent from the chunks, or a filter removed every match. | Try other words. Drop the topic, date, phrase, or regex filter. Call `list_topics` to check topics. |
+| `The PDF '<file>' could not be read.` | The PDF is encrypted, truncated, or not a real PDF. | Remove the password, repair the file, or re-print it to PDF. Then scan again. |
+| `No text could be extracted from '<file>'.` | The page holds an image and no text layer. | Run OCR on the file, save a searchable PDF, then scan again. |
+| `A Python package needed for this step is missing: <name>.` | The environment does not match `pyproject.toml`. | Run `uv sync`, then restart the server. |
+| `The embedding model '<model>' could not be loaded.` | Model not downloaded, wrong `EMBEDDING_MODEL`, or the device rejected the model. | Run `python -m app.download_models` with network access. Check the model name. Check `torch.cuda.is_available()`. |
+| `A network request failed.` | Hugging Face or PyPI is unreachable, or models were never downloaded. | Connect to the internet and run `python -m app.download_models` once. For offline machines, copy a warm `~/.cache/huggingface` from another machine. |
+| `The machine ran out of memory.` / `CUDA out of memory` | The embedding batch is too large for the RAM or VRAM. | Lower `EMBEDDING_BATCH_SIZE` to 8 or 16. Pick another GPU with `GPU_DEVICE_INDEX`. Or set `USE_GPU_ACCELERATION_IF_AVAILABLE=False`. |
+| `The vector database at '<path>' could not be opened.` | Another process holds the database, the folder is read-only, or the files are damaged. | Stop the other server or container. Check write access. Delete the cache folder and re-scan. |
+| `The vector database is locked or unreadable.` | Two servers or containers use `cache/chromadb` at once. | Run one server. Stop the other with `docker compose down` or by closing the other process. |
+| `InvalidDimensionException` / `The stored vector size does not match` | The index was built with another embedding model, or `EMBEDDING_DIMENSION` is stale. | Delete `cache/chromadb`, then run `python -m app.scan_all_my_documents --reset`. |
+| `The tokenizer could not be loaded.` | tiktoken could not fetch its BPE data, usually because the machine is offline. | Run `python -m app.download_models` with network access, or set `TIKTOKEN_CACHE_DIR` to a filled cache. |
+| `A text file could not be decoded.` | The file is not UTF-8 and has no byte-order mark. | Re-save the file as UTF-8, then scan again. |
+| `Permission denied` | The server user cannot read the documents or write the cache. | Grant read access to the documents folder and write access to `cache/chromadb` and `cache/doc_cache`. |
+| `The disk is full.` | The vector store or document cache cannot grow. | Free disk space, then scan again. |
+| `The folder watcher could not start for '<path>'.` | The folder is missing or unreadable, or `watchdog` is not installed. | Create the folder and check `DOCS_DIR`. Run `uv sync`. Then call `start_watching_folder` again. |
+| `Cached text for '<file>' is unreadable.` | A cache entry was truncated, for example by a crash. | No action needed. The scan re-extracts the file and rewrites the cache entry. |
+| `Compute device: cpu (no GPU detected)` in the log | PyTorch has no CUDA device: CPU-only wheel, or no driver. | Install a CUDA wheel: `uv pip install --index-url https://download.pytorch.org/whl/cu128 torch`. |
+
+Every message also ends with a hint pointing at this section. Copy the `Details:` line when you report a bug.
+
+The scan command exits with code `0` when every document was indexed. The scan command exits with `2` when the report holds a problem: a missing folder, no supported files, or files that failed. The scan command exits with `1` on a fatal error, such as an unloadable model.
 
 ## FAQ: search files and PDFs locally
 

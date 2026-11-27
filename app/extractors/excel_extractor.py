@@ -4,6 +4,7 @@ Excel Extractor - Extract text from Excel files.
 
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 import pandas as pd
 
 
@@ -41,7 +42,6 @@ def extract_text_from_excel(excel_path: Path) -> List[Dict[str, Any]]:
             })
         
     except Exception as e:
-        print(f"Error processing Excel file {excel_path}: {e}")
-        return []
+        raise document_error(excel_path, e, "Excel file") from e
     
     return pages_data

@@ -4,6 +4,7 @@ PPTX Extractor - Extract text from PowerPoint presentations.
 
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 
 
 def extract_text_from_pptx(pptx_path: Path) -> List[Dict[str, Any]]:
@@ -38,7 +39,6 @@ def extract_text_from_pptx(pptx_path: Path) -> List[Dict[str, Any]]:
                 })
                 
     except Exception as e:
-        print(f"Error processing PowerPoint {pptx_path}: {e}")
-        return []
+        raise document_error(pptx_path, e, "PowerPoint file") from e
     
     return pages_data

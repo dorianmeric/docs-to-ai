@@ -288,4 +288,15 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from app.errors import DocsToAIError, explain
+
+    try:
+        asyncio.run(main())
+    except DocsToAIError as exc:
+        print(exc.message(), file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception as exc:
+        print(explain(exc, context="mcp_server"), file=sys.stderr)
+        sys.exit(1)

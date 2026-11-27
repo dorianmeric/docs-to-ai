@@ -4,6 +4,7 @@ CSV Extractor - Extract text from CSV files.
 
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 import pandas as pd
 
 
@@ -34,7 +35,6 @@ def extract_text_from_csv(csv_path: Path) -> List[Dict[str, Any]]:
             })
             
     except Exception as e:
-        print(f"Error processing CSV file {csv_path}: {e}")
-        return []
+        raise document_error(csv_path, e, "CSV file") from e
     
     return pages_data

@@ -1,5 +1,6 @@
 # app/download_models.py
 from sentence_transformers import SentenceTransformer, CrossEncoder
+from .errors import DocsToAIError, explain
 from .config import (
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSION,
@@ -24,8 +25,8 @@ def download_tokenizer():
         tiktoken.get_encoding(TOKENIZER_MODEL)
         print(f"Successfully cached {TOKENIZER_MODEL}", file=sys.stderr)
     except Exception as e:
-        # Chunking falls back to a character estimate, so this is not fatal
-        print(f"Warning: could not cache tokenizer {TOKENIZER_MODEL}: {e}", file=sys.stderr)
+        # Chunking falls back to an estimate, so this is not fatal
+        print(explain(e, context="tokenizer download"), file=sys.stderr)
 
 
 def download_models():
@@ -48,7 +49,12 @@ def download_models():
                 file=sys.stderr
             )
     except Exception as e:
-        print(f"Failed to download embedding model: {e}", file=sys.stderr)
+        print(explain(e, context="embedding model download"), file=sys.stderr)
+        print(
+            "Fix: check the model name in EMBEDDING_MODEL and the network connection, then run "
+            "'python -m app.download_models' again.",
+            file=sys.stderr
+        )
         sys.exit(1)
 
     if EMBEDDING_QUERY_PROMPT:
@@ -62,9 +68,12 @@ def download_models():
             CrossEncoder(RERANKER_MODEL)
             print(f"Successfully cached {RERANKER_MODEL}", file=sys.stderr)
         except Exception as e:
-            print(f"Failed to download re-ranker model: {e}", file=sys.stderr)
-            # We don't exit here, as re-ranking is optional
-            pass
+            print(explain(e, context="re-ranker download"), file=sys.stderr)
+            print(
+                "Fix: retry with network access, or set USE_RERANKER=False to run without re-ranking.",
+                file=sys.stderr
+            )
+            # Not fatal: re-ranking is optional
 
 if __name__ == "__main__":
     download_models()

@@ -65,16 +65,20 @@ class IncrementalChangeHandler(FileSystemEventHandler):
         folder_path: Path being watched
     """
     
-    def __init__(self, callback: Callable, folder_path: str):
+    def __init__(self, callback: Callable, folder_path: str,
+                 debounce_seconds: Optional[float] = None):
         """Initialize the handler with a callback function.
         
         Args:
             callback: Function to call with (changes_list, incremental=True)
             folder_path: Path being watched
+            debounce_seconds: Idle time after the last change before the callback
+                runs. Defaults to the DEBOUNCE_SECONDS setting.
         """
         super().__init__()
         self.callback = callback
         self.folder_path = folder_path
+        self.debounce_seconds = DEBOUNCE_SECONDS if debounce_seconds is None else float(debounce_seconds)
     
     def on_created(self, event: FileSystemEvent):
         """Handle file creation events."""
@@ -155,7 +159,7 @@ class IncrementalChangeHandler(FileSystemEventHandler):
                 _debounce_timer.cancel()
             
             _debounce_timer = threading.Timer(
-                DEBOUNCE_SECONDS,
+                self.debounce_seconds,
                 self._execute_update
             )
             _debounce_timer.daemon = True

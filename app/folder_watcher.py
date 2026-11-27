@@ -161,6 +161,7 @@ from watchdog.observers import Observer
 
 from app.config import (
     DOCS_DIR,
+    FULL_SCAN_ON_BOOT,
     FULL_SCAN_INTERVAL_DAYS,
     DEBOUNCE_SECONDS,
     SUPPORTED_EXTENSIONS,
@@ -214,6 +215,18 @@ _pending_changes_lock = threading.Lock()
 # _debounce_timer: Timer for debouncing file changes
 _debounce_timer: Optional[threading.Timer] = None
 _debounce_timer_lock = threading.Lock()
+
+
+def _stop_observer_after_failed_start() -> None:
+    """Stop the watchdog observer after a failed start, so nothing keeps running."""
+    global _observer, _watcher_active
+    _watcher_active = False
+    if _observer is not None:
+        try:
+            _observer.stop()
+        except Exception:
+            pass
+        _observer = None
 
 
 def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = None,
@@ -286,7 +299,20 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
     if not watch_path.exists():
         return {
             "status": "error",
-            "message": f"Folder does not exist: {watch_path}",
+            "message": (
+                f"The folder '{watch_path}' does not exist. Fix: create the folder, put your documents "
+                "in it, or set DOCS_DIR to the folder that holds them. Then start the watcher again."
+            ),
+            "watch_path": str(watch_path)
+        }
+
+    if not watch_path.is_dir():
+        return {
+            "status": "error",
+            "message": (
+                f"The path '{watch_path}' is a file, not a folder. Fix: create a folder for the documents "
+                "and set DOCS_DIR to that folder."
+            ),
             "watch_path": str(watch_path)
         }
 
@@ -368,10 +394,15 @@ def start_watching_folder(scan_callback: Callable, folder_path: Optional[str] = 
         # ====================================================================
         # Error Handling: Reset state and return error
         # ====================================================================
-        _watcher_active = False
+        # A failure after the observer started must not leave a watcher running
+        _stop_observer_after_failed_start()
         return {
             "status": "error",
-            "message": f"Failed to start folder watcher: {str(e)}",
+            "message": (
+                f"The folder watcher could not start: {type(e).__name__}: {e}. "
+                "Fix: check that the folder is readable, that the 'watchdog' package is installed "
+                "(run 'uv sync'), and that no other watcher holds the folder. Then try again."
+            ),
             "watch_path": str(watch_path)
         }
 
@@ -432,7 +463,10 @@ def stop_watching_folder():
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error stopping folder watcher: {str(e)}"
+            "message": (
+                f"The folder watcher could not be stopped: {type(e).__name__}: {e}. "
+                "Fix: restart the server. If the message repeats, report it with this text."
+            )
         }
 
 

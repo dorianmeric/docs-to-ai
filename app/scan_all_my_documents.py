@@ -6,6 +6,7 @@ from pathlib import Path
 from .document_processor import DocumentProcessor
 from .vector_store import VectorStore
 from .config import SUPPORTED_EXTENSIONS, TOPIC_SEPARATOR, DEFAULT_TOPIC, DOCS_DIR
+from .errors import DocsToAIError, explain, format_inline, format_message
 import sys
 
 def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
@@ -33,8 +34,18 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
 
     # Validate that the target directory exists before proceeding
     if not doc_path.exists():
-        response_parts.append(f"Error: Directory {doc_dir} does not exist")
-        return f"\n".join(response_parts)
+        return format_message(
+            f"The documents folder '{doc_dir}' does not exist.",
+            cause="DOCS_DIR points at the wrong folder, or the folder was not created yet.",
+            fix="Create the folder and put your documents in it. Point DOCS_DIR at the folder, or pass it "
+                "explicitly: 'python -m app.scan_all_my_documents --doc-dir ./my-docs'.",
+        )
+    if not doc_path.is_dir():
+        return format_message(
+            f"The path '{doc_dir}' is a file, not a folder.",
+            cause="DOCS_DIR points at a single document instead of a folder.",
+            fix="Create a folder, move the documents into it, and point DOCS_DIR at the folder.",
+        )
 
     # Debug: Output directory information for diagnostics
     response_parts.append(f"Scanning directory: {doc_path.absolute()}")
@@ -83,9 +94,13 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
 
     # Exit early if no supported documents were found
     if not doc_files:
-        response_parts.append(f"\n⚠ No supported documents found in {doc_dir}.")
-        response_parts.append(f"Supported extensions: {', '.join(SUPPORTED_EXTENSIONS)} (case-insensitive)")
-        response_parts.append(f"Please add documents to {doc_path.absolute()} and scan again.")
+        response_parts.append("")
+        response_parts.append(format_message(
+            f"No supported documents were found in '{doc_dir}'.",
+            cause="The folder is empty, or every file has an extension the indexer does not read.",
+            fix=f"Add documents with one of these extensions: {', '.join(SUPPORTED_EXTENSIONS)}. "
+                "Then run the scan again.",
+        ))
         return f"\n".join(response_parts)
 
     # Print header for the document scanning process
@@ -137,7 +152,7 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
             vector_store.reset()
         except Exception as e:
             # First-time setup: database doesn't exist yet, which is fine
-            response_parts.append("✓ Vector store did not exist yet, skipping")
+            response_parts.append(f"✓ Nothing to reset ({type(e).__name__})")
 
         response_parts.append("✓ Vector store reset complete")
 
@@ -191,13 +206,21 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
 
                 response_parts.append(f"  ✓ Added {num_added} chunks")
             else:
-                # Document was processed but yielded no text (possibly empty or unsupported format)
-                response_parts.append(f"  ⚠ No text extracted from {doc_file.name}")
+                # Document was read but yielded no text (empty file, image-only PDF, ..)
+                response_parts.append(
+                    "  " + format_inline(
+                        f"No text could be extracted from '{doc_file.name}'.",
+                        fix="Check that the file is not empty. A scanned PDF has no text layer: run OCR on it, "
+                            "save a searchable PDF, then scan again.",
+                    )
+                )
                 failed += 1
 
         except Exception as e:
             # Catch and report any errors during document processing
-            response_parts.append(f"  ✗ Error processing {doc_file.name}: {e}")
+            response_parts.append(f"  ✗ Could not index {doc_file.name}")
+            for line in explain(e).splitlines():
+                response_parts.append(f"    {line}")
             failed += 1
     
     # Print summary report of the ingestion process
@@ -233,8 +256,14 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
     if stats['topics']:
         response_parts.append(f"  Topics: {', '.join(stats['topics'])}")
 
-    # Final success message
-    response_parts.append(f"\n✓ Successfully scanned and updated all documents (database was reset to prevent duplicates)")
+    # Final status message: do not claim success when documents failed
+    if failed:
+        response_parts.append(
+            f"\n⚠ Scan finished with {failed} document(s) that could not be indexed. "
+            "Read the Problem/Fix lines above, correct the files, then scan again."
+        )
+    else:
+        response_parts.append("\n✓ All documents were indexed (the database was reset first to prevent duplicates)")
 
     # Return all collected messages as a single string
     return f"\n".join(response_parts)
@@ -284,14 +313,28 @@ def main():
     # Parse command-line arguments
     args = parser.parse_args()
 
-    # Reset vector store if user specified the --reset flag
-    if args.reset:
-        print("Resetting vector store...", file=sys.stderr)
-        store = VectorStore()
-        store.reset()
+    try:
+        # Reset vector store if user specified the --reset flag
+        if args.reset:
+            print("Resetting vector store...", file=sys.stderr)
+            store = VectorStore()
+            store.reset()
 
-    # Start the document ingestion process
-    scan_all(args.doc_dir)
+        # Start the document ingestion process and print the report
+        report = scan_all(args.doc_dir)
+        if report:
+            print(report)
+        if "Problem:" in str(report):
+            sys.exit(2)
+    except DocsToAIError as exc:
+        print(exc.message(), file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("Scan interrupted. Nothing else to do: run the scan again to finish indexing.", file=sys.stderr)
+        sys.exit(130)
+    except Exception as exc:
+        print(explain(exc, context="scan_all_my_documents"), file=sys.stderr)
+        sys.exit(1)
 
 
 # Entry point when script is run directly (not imported as a module)

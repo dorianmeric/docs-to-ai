@@ -5,6 +5,7 @@ Markdown Extractor - Extract text from Markdown files.
 import re
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 
 
 def extract_text_from_markdown(md_path: Path) -> List[Dict[str, Any]]:
@@ -37,7 +38,6 @@ def extract_text_from_markdown(md_path: Path) -> List[Dict[str, Any]]:
         })
         
     except Exception as e:
-        print(f"Error processing markdown file {md_path}: {e}")
-        return []
+        raise document_error(md_path, e, "Markdown file") from e
     
     return pages_data

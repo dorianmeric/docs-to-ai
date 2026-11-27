@@ -5,6 +5,7 @@ PDF Extractor - Extract text from PDF documents.
 import pymupdf
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 
 
 def extract_text_from_pdf(pdf_path: Path) -> List[Dict[str, Any]]:
@@ -34,7 +35,6 @@ def extract_text_from_pdf(pdf_path: Path) -> List[Dict[str, Any]]:
         doc.close()
         
     except Exception as e:
-        print(f"Error processing PDF {pdf_path}: {e}")
-        return []
-    
+        raise document_error(pdf_path, e, "PDF") from e
+
     return pages_data

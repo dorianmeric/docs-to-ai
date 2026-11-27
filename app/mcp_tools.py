@@ -9,6 +9,7 @@ import time
 import sys
 from typing import Optional
 
+from app.errors import explain, format_message, friendly_errors
 from app.vector_store import VectorStore
 from app.config import (
     DEFAULT_SEARCH_RESULTS,
@@ -49,6 +50,7 @@ def _format_timestamp(timestamp: float) -> str:
     return "Unknown"
 
 
+@friendly_errors
 def search_documents(
     query: str,
     max_results: int = DEFAULT_SEARCH_RESULTS,
@@ -74,6 +76,14 @@ def search_documents(
     """
     vector_store = VectorStore()
 
+    if vector_store.collection.count() == 0:
+        return format_message(
+            f"The index is empty, so '{query}' could not match anything.",
+            cause="No documents have been indexed yet, or the last scan failed.",
+            fix="Run the 'scan_all_my_documents' tool, or run "
+                "'python -m app.scan_all_my_documents --doc-dir ./my-docs' on the server machine.",
+        )
+
     max_results = min(max(1, max_results), MAX_SEARCH_RESULTS)
 
     search_limit = max_results * 3 if topic or phrase_search or regex_pattern else max_results
@@ -98,7 +108,12 @@ def search_documents(
 
     if not results:
         filter_msg = f" with topic '{topic}'" if topic else ""
-        return f"No results found for query: '{query}'{filter_msg}"
+        return format_message(
+            f"No results found for query: '{query}'{filter_msg}.",
+            cause="The words do not appear in the indexed chunks, or a filter removed every match.",
+            fix="Try fewer or different words. Call 'list_topics' to check the topic filter. Drop the date, "
+                "phrase, or regex filter to widen the search.",
+        )
 
     filter_parts = []
     if topic:
@@ -143,6 +158,7 @@ def search_documents(
     return "\n".join(response_parts)
 
 
+@friendly_errors
 def list_documents(topic: Optional[str] = None) -> str:
     """Get a list of all available documents with their hierarchical topics.
 
@@ -164,7 +180,12 @@ def list_documents(topic: Optional[str] = None) -> str:
 
     if not documents:
         filter_msg = f" with topic '{topic}'" if topic else ""
-        return f"No documents found{filter_msg}. Use 'python -m app.scan_all_my_documents' to add documents."
+        return format_message(
+            f"No documents found{filter_msg}.",
+            cause="Nothing is indexed yet, or the topic filter matches no folder.",
+            fix="Run the 'scan_all_my_documents' tool, or drop the topic filter. Call 'list_topics' to see "
+                "the indexed topics.",
+        )
 
     docs_by_first_topic = {}
     for doc in documents:
@@ -200,13 +221,19 @@ def list_documents(topic: Optional[str] = None) -> str:
     return "\n".join(response_parts)
 
 
+@friendly_errors
 def list_topics() -> str:
     """Get a list of all topics/categories in the document collection."""
     vector_store = VectorStore()
     topics = vector_store.list_topics()
 
     if not topics:
-        return "No topics found. Use scan_all_my_documents.py to add documents."
+        return format_message(
+            "No topics found.",
+            cause="Nothing is indexed yet, or USE_FOLDER_AS_TOPIC is off and every document uses the "
+                  "default topic.",
+            fix="Run the 'scan_all_my_documents' tool. Put documents in subfolders to get one topic per folder.",
+        )
 
     stats = vector_store.get_stats()
     topic_counts = stats['documents_per_topic']
@@ -222,6 +249,7 @@ def list_topics() -> str:
     return response
 
 
+@friendly_errors
 def get_collection_stats() -> str:
     """Get statistics about the document collection."""
     vector_store = VectorStore()
@@ -269,6 +297,7 @@ def get_collection_stats() -> str:
     return response
 
 
+@friendly_errors
 def scan_all_my_documents() -> str:
     """Scan all documents in the docs directory and update the vector database."""
     try:
@@ -278,9 +307,10 @@ def scan_all_my_documents() -> str:
             return "\n".join(item.text for item in result if hasattr(item, 'text'))
         return str(result)
     except Exception as e:
-        return f"Error scanning documents: {str(e)}"
+        return explain(e, context="scan_all_my_documents")
 
 
+@friendly_errors
 def start_watching_folder() -> str:
     """Start watching the documents folder for changes and automatically trigger incremental updates."""
     try:
@@ -292,9 +322,7 @@ def start_watching_folder() -> str:
                     return scan_all(DOCS_DIR)
             except Exception as e:
                 print(f"[MCP] Error during scan: {e}", file=sys.stderr)
-                import traceback
-                traceback.print_exc()
-                return f"Error during scan: {str(e)}"
+                return explain(e, context="folder watcher scan")
 
         result = start_folder_watcher(scan_callback, do_initial_scan=True)
 
@@ -317,11 +345,17 @@ def start_watching_folder() -> str:
             auto_start_msg = " (auto-started on boot)" if FOLDER_WATCHER_ACTIVE_ON_BOOT else ""
             return f"Folder watcher is already active{auto_start_msg}\n\nWatching: {result['watch_path']}"
         else:
-            return f"Failed to start folder watcher\n\nError: {result.get('message', 'Unknown error')}"
+            return format_message(
+                f"The folder watcher could not start for '{DOCS_DIR}'.",
+                cause=result.get('message', "The folder is missing, unreadable, or the watcher failed to start."),
+                fix="Check DOCS_DIR. Create the folder and give the server read access. Then call "
+                    "'start_watching_folder' again.",
+            )
     except Exception as e:
-        return f"Error starting folder watcher: {str(e)}"
+        return explain(e, context="start_watching_folder")
 
 
+@friendly_errors
 def stop_watching_folder() -> str:
     """Stop watching the folder for changes."""
     try:
@@ -332,11 +366,16 @@ def stop_watching_folder() -> str:
         elif result['status'] == 'not_watching':
             return "Folder watcher is not currently active"
         else:
-            return f"Error stopping folder watcher: {result.get('message', 'Unknown error')}"
+            return format_message(
+                "The folder watcher could not be stopped.",
+                cause=result.get('message', "The watcher was in an unexpected state."),
+                fix="Restart the server. If the message repeats, report it with the text above.",
+            )
     except Exception as e:
-        return f"Error stopping folder watcher: {str(e)}"
+        return explain(e, context="stop_watching_folder")
 
 
+@friendly_errors
 def get_time_of_last_folder_scan() -> str:
     """Get the timestamp of when the last folder scan was started and finished."""
     try:
@@ -368,6 +407,10 @@ def get_time_of_last_folder_scan() -> str:
         elif result["status"] == "no_scans_yet":
             return "Folder watcher is active but no scans have been triggered yet"
         else:
-            return f"Error: {result.get('message', 'Unknown error')}"
+            return format_message(
+                "The last scan status could not be read.",
+                cause=result.get('message', "The watcher is in an unexpected state."),
+                fix="Start the watcher with 'start_watching_folder', then ask again.",
+            )
     except Exception as e:
-        return f"Error getting last scan time: {str(e)}"
+        return explain(e, context="get_time_of_last_folder_scan")

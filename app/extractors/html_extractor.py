@@ -4,6 +4,7 @@ HTML Extractor - Extract text from HTML files.
 
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 from bs4 import BeautifulSoup
 
 
@@ -51,7 +52,6 @@ def extract_text_from_html(html_path: Path) -> List[Dict[str, Any]]:
             })
             
     except Exception as e:
-        print(f"Error processing HTML file {html_path}: {e}")
-        return []
+        raise document_error(html_path, e, "HTML file") from e
     
     return pages_data

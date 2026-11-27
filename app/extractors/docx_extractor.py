@@ -4,6 +4,7 @@ DOCX Extractor - Extract text from Word documents.
 
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 from docx import Document as DocxDocument
 
 
@@ -41,7 +42,6 @@ def extract_text_from_docx(docx_path: Path) -> List[Dict[str, Any]]:
                     current_text = []
         
     except Exception as e:
-        print(f"Error processing Word document {docx_path}: {e}")
-        return []
+        raise document_error(docx_path, e, "Word document") from e
     
     return pages_data

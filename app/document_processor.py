@@ -13,6 +13,7 @@ from .config import (
     SEMANTIC_CHUNK_BUFFER_SIZE
 )
 
+from .errors import explain
 from .extractors import (
     extract_text_from_pdf,
     extract_text_from_docx,
@@ -162,13 +163,23 @@ class DocumentProcessor:
         # Check cache
         cache_file = self._get_cache_path(doc_file)
         if cache_file.exists():
-            cached_data = json.load(open(cache_file, 'r', encoding='utf-8'))
-            # Update topics in cached data in case folder structure changed
-            for page_data in cached_data:
-                page_data['metadata']['topics'] = topics
-                page_data['metadata']['file_size'] = file_size
-                page_data['metadata']['last_modified'] = last_modified
-            return cached_data
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as handle:
+                    cached_data = json.load(handle)
+                # Update topics in cached data in case folder structure changed
+                for page_data in cached_data:
+                    page_data['metadata']['topics'] = topics
+                    page_data['metadata']['file_size'] = file_size
+                    page_data['metadata']['last_modified'] = last_modified
+                return cached_data
+            except (json.JSONDecodeError, OSError, KeyError) as exc:
+                # A damaged cache entry must not stop the scan: drop it and re-extract
+                print(
+                    f"Cached text for '{doc_file.name}' is unreadable ({type(exc).__name__}). "
+                    "Fix: nothing to do, the file is being re-extracted and the cache rewritten.",
+                    file=sys.stderr
+                )
+                cache_file.unlink(missing_ok=True)
 
         # Determine file type and extract text
         extension = doc_file.suffix.lower()
@@ -214,7 +225,7 @@ class DocumentProcessor:
             })
 
         # Cache the result
-        self._cache_extracted_text(doc_file, result)
+        self._cache_extracted_text_safe(doc_file, result)
         
         return result
     
@@ -615,6 +626,17 @@ class DocumentProcessor:
         """Generate cache file path for a document."""
         doc_hash = hashlib.md5(str(doc_path).encode()).hexdigest()
         return self.cache_dir / f"{doc_hash}.json"
+
+    def _cache_extracted_text_safe(self, doc_path: Path, pages_data: List[Dict]) -> None:
+        """Cache extracted text, and tolerate an unwritable cache folder."""
+        try:
+            self._cache_extracted_text(doc_path, pages_data)
+        except OSError as exc:
+            print(
+                f"Could not write the extracted-text cache for '{doc_path.name}'",
+                file=sys.stderr
+            )
+            print(explain(exc, context="cache write"), file=sys.stderr)
     
     def _cache_extracted_text(self, doc_path: Path, pages_data: List[Dict]):
         """Cache extracted text to avoid reprocessing."""

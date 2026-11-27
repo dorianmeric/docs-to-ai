@@ -24,6 +24,7 @@ from app.config import (
     HNSW_EF_CONSTRUCTION,
 )
 from app.device import describe_device, resolve_device
+from app.errors import DocsToAIError
 from app.embeddings import (
     get_embedding_model,
     get_embedding_dimension,
@@ -56,16 +57,26 @@ class VectorStore:
         if VectorStore._initialized:
             return
 
-        CHROMADB_DIR.mkdir(exist_ok=True, parents=True) # create the folder if it doesn't exist yet
-
         # Initialize chromadb client with persistence
-        self.client = chromadb.PersistentClient(
-            path=str(CHROMADB_DIR),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
+        try:
+            CHROMADB_DIR.mkdir(exist_ok=True, parents=True)
+            self.client = chromadb.PersistentClient(
+                path=str(CHROMADB_DIR),
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
             )
-        )
+        except Exception as exc:
+            raise DocsToAIError(
+                problem=f"The vector database at '{CHROMADB_DIR}' could not be opened.",
+                cause="Another Docs-to-AI process is using the database, the folder is not writable, "
+                      "or the database files are damaged.",
+                fix="Stop any other server or Docker container that uses this folder. Check that the folder "
+                    "is writable. If nothing holds the folder, delete it and re-scan: it only holds a cache "
+                    "built from your documents.",
+                details=f"{type(exc).__name__}: {exc}",
+            ) from exc
 
         # Initialize embedding model (shared process-wide instance)
         # print(f"Loading embedding model: {EMBEDDING_MODEL}", file=sys.stderr)
@@ -79,7 +90,17 @@ class VectorStore:
                 f"Loading re-ranker model: {RERANKER_MODEL} on {describe_device(device)}",
                 file=sys.stderr
             )
-            self.cross_encoder = CrossEncoder(RERANKER_MODEL, device=device)
+            try:
+                self.cross_encoder = CrossEncoder(RERANKER_MODEL, device=device)
+            except Exception as exc:
+                raise DocsToAIError(
+                    problem=f"The re-ranker model '{RERANKER_MODEL}' could not be loaded.",
+                    cause="The model name is wrong, the model files are not downloaded yet, or the device "
+                          "rejected the model.",
+                    fix="Run 'python -m app.download_models' once with network access. To skip re-ranking "
+                        "entirely, set USE_RERANKER=False.",
+                    details=f"{type(exc).__name__}: {exc}",
+                ) from exc
             print("Re-ranker is active.", file=sys.stderr)
 
         # The collection's dimension decides compatibility, so trust the model over
@@ -93,7 +114,19 @@ class VectorStore:
         self._bm25_generation = 0
 
         # Get or create collection (with cosine space + HNSW tuning)
-        self.collection = self._ensure_collection()
+        try:
+            self.collection = self._ensure_collection()
+        except DocsToAIError:
+            raise
+        except Exception as exc:
+            raise DocsToAIError(
+                problem=f"The collection '{CHROMA_COLLECTION_NAME}' could not be opened or created.",
+                cause="The database is locked by another process, its files are damaged, or the collection "
+                      "name is invalid.",
+                fix="Stop the other server, then retry. If the message repeats, delete the vector store "
+                    "folder and re-scan your documents.",
+                details=f"{type(exc).__name__}: {exc}",
+            ) from exc
 
         if self.bm25 is not None:
             print("Hybrid search is active (BM25 + dense, fused with RRF)", file=sys.stderr)
@@ -247,12 +280,22 @@ class VectorStore:
         embeddings = encode_passages(texts, show_progress_bar=True)
         
         # Add to collection (using upsert to prevent duplicates)
-        self.collection.upsert(
-            ids=ids,
-            embeddings=embeddings.tolist(),
-            documents=texts,
-            metadatas=metadatas
-        )
+        try:
+            self.collection.upsert(
+                ids=ids,
+                embeddings=embeddings.tolist(),
+                documents=texts,
+                metadatas=metadatas
+            )
+        except Exception as exc:
+            raise DocsToAIError(
+                problem=f"The new chunks could not be written to the collection '{CHROMA_COLLECTION_NAME}'.",
+                cause="The stored vector size does not match the current embedding model, or the database "
+                      "folder is not writable.",
+                fix="Delete cache/chromadb (it only holds a cache) and re-scan: "
+                    "'python -m app.scan_all_my_documents --doc-dir ./my-docs --reset'.",
+                details=f"{type(exc).__name__}: {exc}",
+            ) from exc
 
         # Keep the sparse index in sync: append when it is already built (cheap),
         # otherwise let the next search rebuild it from the collection
@@ -296,10 +339,19 @@ class VectorStore:
         if n_results <= 0 or self.collection.count() == 0:
             return []
 
-        results = self.collection.query(
-            query_embeddings=[encode_one_query(query)],
-            n_results=n_results
-        )
+        try:
+            results = self.collection.query(
+                query_embeddings=[encode_one_query(query)],
+                n_results=n_results
+            )
+        except Exception as exc:
+            raise DocsToAIError(
+                problem=f"The vector search for '{query}' failed.",
+                cause="The index was built with a different embedding model, or the database is damaged.",
+                fix="Re-scan the documents. If the error repeats, delete cache/chromadb and run "
+                    "'python -m app.scan_all_my_documents --reset'.",
+                details=f"{type(exc).__name__}: {exc}",
+            ) from exc
 
         formatted_results: List[Dict] = []
         ids = results.get('ids') or []

@@ -24,6 +24,7 @@ from sentence_transformers import SentenceTransformer
 
 from .config import EMBEDDING_MODEL, EMBEDDING_BATCH_SIZE, EMBEDDING_QUERY_PROMPT
 from .device import describe_device, resolve_device
+from .errors import DocsToAIError, explain
 
 _model: Optional[SentenceTransformer] = None
 _query_prompt: Optional[str] = None
@@ -39,7 +40,18 @@ def get_embedding_model() -> SentenceTransformer:
             f"Loading embedding model: {EMBEDDING_MODEL} on {describe_device(device)}",
             file=sys.stderr
         )
-        _model = SentenceTransformer(EMBEDDING_MODEL, device=device)
+        try:
+            _model = SentenceTransformer(EMBEDDING_MODEL, device=device)
+        except Exception as exc:
+            raise DocsToAIError(
+                problem=f"The embedding model '{EMBEDDING_MODEL}' could not be loaded.",
+                cause="The model name is wrong, the model files are not downloaded yet, or the machine cannot "
+                      "run the model on the selected device.",
+                fix="Check EMBEDDING_MODEL (default: Qwen/Qwen3-Embedding-0.6B). Run "
+                    "'python -m app.download_models' once with network access. If a GPU is involved, run "
+                    "'python -c \"import torch; print(torch.cuda.is_available())\"' to check the driver.",
+                details=f"{type(exc).__name__}: {exc}",
+            ) from exc
     return _model
 
 
@@ -79,7 +91,18 @@ def _encode(texts: Sequence[str], prompt: Optional[str] = None,
     }
     if prompt:
         kwargs['prompt'] = prompt
-    return np.asarray(model.encode(list(texts), **kwargs))
+    try:
+        return np.asarray(model.encode(list(texts), **kwargs))
+    except Exception as exc:
+        # Out-of-memory is the usual failure here: say so instead of dumping a traceback
+        raise DocsToAIError(
+            problem=f"The embedding model failed while encoding {len(texts)} text(s).",
+            cause="The batch is larger than the available memory, or the GPU rejected the computation.",
+            fix="Lower EMBEDDING_BATCH_SIZE (try 8 or 16) and retry. On a multi-GPU machine set "
+                "GPU_DEVICE_INDEX to a card with more VRAM. Set USE_GPU_ACCELERATION_IF_AVAILABLE=False to "
+                "run this step on the CPU.",
+            details=explain(exc).splitlines()[-1],
+        ) from exc
 
 
 def encode_passages(texts: Sequence[str], show_progress_bar: bool = False) -> np.ndarray:

@@ -4,6 +4,7 @@ TXT Extractor - Extract text from plain text files.
 
 from pathlib import Path
 from typing import List, Dict, Any
+from ..errors import document_error
 
 
 def extract_text_from_txt(txt_path: Path) -> List[Dict[str, Any]]:
@@ -42,7 +43,6 @@ def extract_text_from_txt(txt_path: Path) -> List[Dict[str, Any]]:
             })
             
     except Exception as e:
-        print(f"Error processing text file {txt_path}: {e}")
-        return []
+        raise document_error(txt_path, e, "text file") from e
     
     return pages_data
