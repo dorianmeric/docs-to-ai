@@ -138,23 +138,35 @@ Failed: 0
 Total chunks added: 523
 ```
 
-### Two transports, both active
+### Pick one transport
 
-`mcp_server.py` serves stdio and HTTP/SSE at the same time.
+`MCP_TRANSPORT` selects how clients talk to the server. One transport per process.
 
-- stdio: for Claude Desktop and other local MCP clients.
-- HTTP/SSE: `http://localhost:38777/sse`, messages on `http://localhost:38777/messages/`.
-
-Change the HTTP side with flags or environment variables:
+- `stdio`: the client starts the process and talks over stdin/stdout. No port. Best for local installs and for `docker exec -i`.
+- `http`: the process listens on `MCP_HOST:MCP_PORT` and serves the MCP endpoint at `/mcp`. Best for Docker. This is the Docker default.
+- `sse`: older HTTP transport, endpoint at `/sse`. Use it only for clients that need SSE.
 
 ```bash
-python mcp_server.py --host 0.0.0.0 --port 38777
+python mcp_server.py --http --host 0.0.0.0 --port 38777     # same as MCP_TRANSPORT=http
+MCP_TRANSPORT=http MCP_PORT=38777 python mcp_server.py
+MCP_TRANSPORT=sse  mcp_server.py --port 38777
 ```
 
+`--websocket` still works as an alias for `--http`.
+
+With `http` or `sse`, startup prints every address a client may need:
+
+```
+2026-11-27 13:56:18 SUCCESS ✅ [MCP Server] Listening on 0.0.0.0:38777/mcp
+                                           From inside the container or machine: http://172.23.0.2:38777/mcp
+                                           From this Docker host or a browser on it: http://localhost:38777/mcp
+                                           From another machine: http://<host-ip>:38777/mcp
+```
+
+Set `MCP_PUBLIC_URL` when the host port differs from `MCP_PORT`, or when a proxy sits in front:
+
 ```bash
-export MCP_HOST=0.0.0.0
-export MCP_PORT=38777
-python mcp_server.py
+MCP_PUBLIC_URL=http://myserver.lan:8080/mcp
 ```
 
 ### Claude Desktop config
@@ -172,18 +184,22 @@ stdio mode:
 }
 ```
 
-HTTP/SSE mode:
+HTTP mode (server already running with `MCP_TRANSPORT=http`):
 
 ```json
 {
   "mcpServers": {
     "docs-to-ai": {
-      "url": "http://localhost:38777/sse",
-      "transport": "sse"
+      "url": "http://localhost:38777/mcp",
+      "transport": "http"
     }
   }
 }
 ```
+
+Some clients want `"type": "http"` instead of `"transport": "http"`. Use whichever key your client documents.
+
+SSE clients use `http://localhost:38777/sse` with `"transport": "sse"`.
 
 ## Install with Docker
 
@@ -206,8 +222,13 @@ services:
     stdin_open: true
     tty: true
 
+    environment:
+      - MCP_TRANSPORT=http                     # http://localhost:38777/mcp
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=38777
+
     ports:
-      - "${MCP_PORT:-38777}:38777"            # http://localhost:38777/sse
+      - "${MCP_PORT:-38777}:${MCP_PORT:-38777}"
 
     restart: unless-stopped
 ````
@@ -216,9 +237,23 @@ Start it:
 
 ```bash
 docker compose up -d
+docker compose logs | grep -A4 "Listening on"
 ```
 
-Claude Desktop config for the container:
+The container keeps running and serves MCP at `http://localhost:38777/mcp`. Point the client there:
+
+```json
+{
+  "mcpServers": {
+    "docs-to-ai": {
+      "url": "http://localhost:38777/mcp",
+      "transport": "http"
+    }
+  }
+}
+```
+
+A client that only speaks stdio can run the server inside the running container instead. This reuses the same container, mounts, and index:
 
 ```json
 {
@@ -230,6 +265,8 @@ Claude Desktop config for the container:
   }
 }
 ```
+
+Do not use `docker run -i --rm mcp/docs-to-ai` in a client config. That command starts a **new throwaway container for every connection**. The new container has no volumes, so it cannot see `./my-docs` or the index, and it re-scans from scratch each time.
 
 Put your documents in `./my-docs` on the host. The container sees that folder at `/app/my-docs`. Ask the LLM to run `scan_all_my_documents`, or wait for the startup scan. Ask the LLM to run `start_watching_folder` to keep the index fresh.
 
@@ -552,7 +589,7 @@ The index uses cosine space. The embedding model returns normalised vectors, and
 
 | Setting | Env var | Default | Description |
 |---|---|---|---|
-| Transport | `MCP_TRANSPORT` | `stdio` | `stdio` or `websocket` |
+| Transport | `MCP_TRANSPORT` | `stdio` | `stdio`, `http` (`/mcp`), or `sse` (`/sse`). The Docker image sets `http` |
 | Host | `MCP_HOST` | `0.0.0.0` | HTTP bind address |
 | Port | `MCP_PORT` | `38777` | HTTP port |
 
@@ -651,6 +688,9 @@ The server explains each failure in three parts: what happened, the likely cause
 | `The folder watcher could not start for '<path>'.` | The folder is missing or unreadable, or `watchdog` is not installed. | Create the folder and check `DOCS_DIR`. Run `uv sync`. Then call `start_watching_folder` again. |
 | `Cached text for '<file>' is unreadable.` | A cache entry was truncated, for example by a crash. | No action needed. The scan re-extracts the file and rewrites the cache entry. |
 | `Compute device: cpu (no GPU detected)` in the log | PyTorch has no CUDA device: CPU-only wheel, or no driver. | Install a CUDA wheel: `uv pip install --index-url https://download.pytorch.org/whl/cu128 torch`. |
+| A new container starts for every LLM connection, and it sees no documents | The client config runs `docker run -i --rm mcp/docs-to-ai`. `docker run` creates a fresh container per connection, with no volumes and no index. | Point the client at the running container instead: `"url": "http://localhost:38777/mcp", "transport": "http"`, or use `docker exec -i docs-to-ai python mcp_server.py` for stdio. |
+| `Connection refused` or `Failed to connect to localhost:38777` | The server runs with `MCP_TRANSPORT=stdio`, so nothing listens on the port. | Start it with `MCP_TRANSPORT=http` (the Docker compose file does this) and check the startup log for `Listening on 0.0.0.0:38777/mcp`. |
+| The startup log shows `Listening on 127.0.0.1:...` and the host cannot connect | `MCP_HOST=127.0.0.1` binds inside the container only. | Set `MCP_HOST=0.0.0.0`. |
 | `No GPU is visible inside this container` in the log | Docker started the container without the GPU device reservation, so `/dev/nvidia*` does not exist inside it. | Add the override: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`. Or set `COMPOSE_FILE` in `.env` (`;` between files on Windows, `:` on Linux/macOS). Or add `--gpus all` to `docker run`. |
 | `docker compose up` fails with `could not select device driver "" with capabilities: [[gpu]]` | The host has no NVIDIA driver, no NVIDIA Container Toolkit, or Docker Desktop uses the Hyper-V backend. | Install the NVIDIA driver and (on Linux) the NVIDIA Container Toolkit. On Docker Desktop, enable the WSL2 based engine. Then retry. |
 | `Error calling tool '<name>': maximum recursion depth exceeded` | An older build registered each MCP tool under the same name it imported, so the tool called itself. The current source imports the implementations under private names. | Rebuild the container with the current source: `docker compose build --no-cache`. |

@@ -7,8 +7,9 @@ information from a collection of documents stored in a vector database.
 """
 
 import asyncio
-import sys
 import os
+import socket
+import sys
 from contextlib import asynccontextmanager
 from fastmcp import FastMCP
 from app.folder_watcher import (
@@ -158,25 +159,81 @@ def get_time_of_last_folder_scan() -> str:
     return _get_time_of_last_folder_scan()
 
 
+MCP_HTTP_PATH = {"http": "/mcp", "sse": "/sse"}
+
+
+def _transport_mode(raw: str) -> str:
+    """Map MCP_TRANSPORT to 'stdio', 'http', or 'sse'.
+
+    'websocket' is kept as an alias for 'http' because older versions of this
+    project used that name.
+    """
+    value = (raw or "stdio").strip().lower()
+    if value in {"stdio", ""}:
+        return "stdio"
+    if value in {"http", "streamable-http", "streamable_http", "websocket", "ws"}:
+        return "http"
+    if value == "sse":
+        return "sse"
+    log_warn(
+        f"Unknown MCP_TRANSPORT '{raw}', using stdio. Valid values: stdio, http, sse.",
+        component="MCP Server",
+    )
+    return "stdio"
+
+
+def _local_address() -> str | None:
+    """Best-effort IP of this machine/container, used only for the startup log."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))  # UDP connect sends no packets
+            return sock.getsockname()[0]
+    except OSError:
+        pass
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except OSError:
+        return None
+
+
+def _log_listen_addresses(host: str, port: int, mode: str) -> None:
+    """Say where the server listens, inside the container and from the host."""
+    path = MCP_HTTP_PATH.get(mode, "/mcp")
+    address = _local_address()
+    lines = [f"Listening on {host}:{port}{path} (the port opens once the models finish loading)"]
+    if address and address not in {"0.0.0.0", "127.0.0.1"}:
+        lines.append(f"From inside the container or machine: http://{address}:{port}{path}")
+    lines.append(f"From this Docker host or a browser on it: http://localhost:{port}{path}")
+    lines.append(f"From another machine: http://<host-ip>:{port}{path}")
+    public_url = os.getenv("MCP_PUBLIC_URL", "").strip()
+    if public_url:
+        lines.append(f"Configured client URL (MCP_PUBLIC_URL): {public_url}")
+    if host == "127.0.0.1":
+        lines.append("MCP_HOST is 127.0.0.1, so only this container can connect. Use 0.0.0.0 to expose it.")
+    log_success("\n".join(lines), component="MCP Server")
+
+
 async def main():
     """Main entry point - determine transport type from environment or arguments."""
-    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    transport = _transport_mode(os.getenv("MCP_TRANSPORT", "stdio"))
 
     if len(sys.argv) > 1:
         if sys.argv[1] in ["--websocket", "--sse", "--http"]:
-            transport = "websocket"
+            transport = _transport_mode(sys.argv[1].lstrip("-"))
         elif sys.argv[1] == "--stdio":
             transport = "stdio"
         elif sys.argv[1] == "--help":
             print("Usage: python mcp_server.py [OPTIONS]")
             print("\nOptions:")
             print("  --stdio              Use stdio transport (default)")
-            print("  --websocket, --sse   Use SSE/WebSocket transport over HTTP")
+            print("  --http               Serve MCP over HTTP on MCP_HOST:MCP_PORT at /mcp")
+            print("  --sse                Serve MCP over HTTP with SSE at /sse")
+            print("  --websocket          Alias for --http (kept for backwards compatibility)")
             print("  --host HOST          Host to bind to (default: 0.0.0.0)")
             print("  --port PORT          Port to bind to (default: 38777)")
             print("  --show-config        Print the effective configuration and exit")
             print("\nEnvironment Variables (defaults shown):")
-            print("  MCP_TRANSPORT        Transport type: 'stdio' or 'websocket' (default: stdio)")
+            print("  MCP_TRANSPORT        Transport type: 'stdio', 'http', or 'sse' (default: stdio; the Docker image uses http)")
             print("  MCP_HOST             Host to bind to, websocket mode (default: 0.0.0.0)")
             print("  MCP_PORT             Port to bind to, websocket mode (default: 38777)")
             print("\nChunking (defaults shown):")
@@ -300,9 +357,20 @@ async def main():
         else:
             i += 1
 
-    if transport == "websocket":
-        await mcp.run_http_async(host=host, port=port)
+    if transport in {"http", "sse"}:
+        _log_listen_addresses(host, port, transport)
+        await mcp.run_http_async(
+            transport="sse" if transport == "sse" else "http",
+            host=host,
+            port=port,
+            path=MCP_HTTP_PATH[transport],
+        )
     else:
+        log_info(
+            "Transport: stdio. The client starts this process and talks over stdin/stdout; "
+            "no network port is opened. Set MCP_TRANSPORT=http to listen on a port instead.",
+            component="MCP Server",
+        )
         await mcp.run_stdio_async()
 
 
