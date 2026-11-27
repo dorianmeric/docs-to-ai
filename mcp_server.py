@@ -183,11 +183,14 @@ async def main():
             print("  BM25_WEIGHT             RRF weight of the BM25 list, 0.5 = equal (default: 0.3)")
             print("  BM25_K1 / BM25_B        BM25 term saturation / length normalisation (default: 1.5 / 0.75)")
             print("  RRF_K                   Reciprocal Rank Fusion constant (default: 60)")
-            print("\nEmbedding / storage / topics (defaults shown):")
+            print("\nEmbedding / GPU (defaults shown):")
             print("  EMBEDDING_MODEL         Sentence-transformer model (default: Qwen/Qwen3-Embedding-0.6B)")
             print("  EMBEDDING_DIMENSION     Vector dimension (default: 1024)")
             print("  EMBEDDING_BATCH_SIZE    Texts per encode batch (default: 32)")
             print("  EMBEDDING_QUERY_PROMPT  Query instruction prefix (default: model's built-in 'query' prompt)")
+            print("  USE_GPU_ACCELERATION_IF_AVAILABLE  Use CUDA/MPS for the embedding model and re-ranker, else CPU (default: True)")
+            print("  GPU_DEVICE_INDEX        0-based index of the CUDA GPU to use (default: 0)")
+            print("\nStorage / topics (defaults shown):")
             print("  CHROMA_SPACE            HNSW distance space: cosine | l2 | ip (default: cosine)")
             print("  HNSW_EF_SEARCH          HNSW query-time candidate list size (default: 200)")
             print("  HNSW_EF_CONSTRUCTION    HNSW build-time candidate list size (default: 200)")
@@ -209,6 +212,7 @@ async def main():
                 SEMANTIC_CHUNK_PERCENTILE, SEMANTIC_CHUNK_MIN_SIZE, SEMANTIC_CHUNK_MAX_SIZE,
                 SEMANTIC_CHUNK_BUFFER_SIZE, EMBEDDING_MODEL, EMBEDDING_DIMENSION,
                 EMBEDDING_BATCH_SIZE, EMBEDDING_QUERY_PROMPT,
+                USE_GPU_ACCELERATION_IF_AVAILABLE, GPU_DEVICE_INDEX,
                 DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, USE_RERANKER, RERANKER_MODEL,
                 RERANKER_TOP_N, USE_BM25, BM25_WEIGHT, BM25_K1, BM25_B, RRF_K,
                 USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC,
@@ -221,6 +225,13 @@ async def main():
             print(f"  EMBEDDING_DIMENSION={EMBEDDING_DIMENSION}")
             print(f"  EMBEDDING_BATCH_SIZE={EMBEDDING_BATCH_SIZE}")
             print(f"  EMBEDDING_QUERY_PROMPT={EMBEDDING_QUERY_PROMPT or '(model default)'}")
+            print(f"  USE_GPU_ACCELERATION_IF_AVAILABLE={USE_GPU_ACCELERATION_IF_AVAILABLE}")
+            print(f"  GPU_DEVICE_INDEX={GPU_DEVICE_INDEX}")
+            try:
+                from app.device import describe_device, resolve_device
+                print(f"  DEVICE={describe_device(resolve_device())}")
+            except Exception as e:  # torch missing or broken - not fatal
+                print(f"  DEVICE=unknown ({e})")
             print(f"  CHUNKING_STRATEGY={CHUNKING_STRATEGY}")
             print(f"  CHUNK_SIZE={CHUNK_SIZE}")
             print(f"  CHUNK_OVERLAP={CHUNK_OVERLAP}")

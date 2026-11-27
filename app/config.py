@@ -142,6 +142,12 @@ SEMANTIC_CHUNK_MIN_SIZE = _env_int('SEMANTIC_CHUNK_MIN_SIZE', 64)  # Minimum tok
 SEMANTIC_CHUNK_MAX_SIZE = _env_int('SEMANTIC_CHUNK_MAX_SIZE', 1024)  # Maximum tokens per semantic chunk (hard split above this)
 SEMANTIC_CHUNK_BUFFER_SIZE = _env_int('SEMANTIC_CHUNK_BUFFER_SIZE', 1)  # Neighbouring sentences combined when computing similarity
 
+# Compute / GPU Configuration
+# Only the embedding model and the cross-encoder re-ranker can use a GPU; BM25
+# and ChromaDB's local HNSW index stay on the CPU.
+USE_GPU_ACCELERATION_IF_AVAILABLE = _env_bool('USE_GPU_ACCELERATION_IF_AVAILABLE', True)  # Use CUDA/MPS when present, else CPU
+GPU_DEVICE_INDEX = _env_int('GPU_DEVICE_INDEX', 0)  # 0-based index of the CUDA GPU to use (0 = first GPU)
+
 # Search Configuration
 DEFAULT_SEARCH_RESULTS: int = _env_int('DEFAULT_SEARCH_RESULTS', 10)
 MAX_SEARCH_RESULTS: int = _env_int('MAX_SEARCH_RESULTS', 20)

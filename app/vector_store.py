@@ -23,6 +23,7 @@ from app.config import (
     HNSW_EF_SEARCH,
     HNSW_EF_CONSTRUCTION,
 )
+from app.device import describe_device, resolve_device
 from app.embeddings import (
     get_embedding_model,
     get_embedding_dimension,
@@ -73,8 +74,12 @@ class VectorStore:
         # Initialize re-ranker model if enabled
         self.cross_encoder = None
         if USE_RERANKER:
-            print(f"Loading re-ranker model: {RERANKER_MODEL}", file=sys.stderr)
-            self.cross_encoder = CrossEncoder(RERANKER_MODEL)
+            device = resolve_device()
+            print(
+                f"Loading re-ranker model: {RERANKER_MODEL} on {describe_device(device)}",
+                file=sys.stderr
+            )
+            self.cross_encoder = CrossEncoder(RERANKER_MODEL, device=device)
             print("Re-ranker is active.", file=sys.stderr)
 
         # The collection's dimension decides compatibility, so trust the model over

@@ -9,6 +9,8 @@ services:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
         EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
         EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+        USE_GPU_ACCELERATION_IF_AVAILABLE: ${USE_GPU_ACCELERATION_IF_AVAILABLE:-True}
+        GPU_DEVICE_INDEX: ${GPU_DEVICE_INDEX:-0}
         USE_RERANKER: ${USE_RERANKER:-True}
         RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
         CHUNKING_STRATEGY: ${CHUNKING_STRATEGY:-semantic}
@@ -58,6 +60,8 @@ services:
       - EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION:-1024}
       - EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-32}
       # - EMBEDDING_QUERY_PROMPT=...  # defaults to the model's built-in query prompt
+      - USE_GPU_ACCELERATION_IF_AVAILABLE=${USE_GPU_ACCELERATION_IF_AVAILABLE:-True}
+      - GPU_DEVICE_INDEX=${GPU_DEVICE_INDEX:-0}
       - CHUNKING_STRATEGY=${CHUNKING_STRATEGY:-semantic}
       - CHUNK_SIZE=${CHUNK_SIZE:-1024}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
@@ -107,6 +111,19 @@ services:
     # Restart policy
     restart: unless-stopped
     
+    # GPU passthrough (optional). Uncomment to expose NVIDIA GPUs to the
+    # container; requires the NVIDIA driver + NVIDIA Container Toolkit on the
+    # host, and a CUDA-enabled torch build (the PyPI Linux wheel is CUDA-enabled).
+    # Remove this block on hosts without a GPU, otherwise `docker compose up`
+    # fails while reserving the device.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all          # or `device_ids: ['0']` to pin a GPU
+    #           capabilities: [gpu]
+
     # Resource limits (optional - adjust based on your needs)
     # deploy:
     #   resources:

@@ -12,6 +12,7 @@ Retrieval uses **Qwen3-Embedding-0.6B** (1024-dim, 32K context) for dense vector
 - Organize documents by topics (using folder structure)
 - Generate embeddings for semantic search (Qwen3-Embedding-0.6B, 1024-dim)
 - Hybrid retrieval: BM25 (exact terms, IDs, codes) + dense vectors, fused with RRF
+- Automatic GPU acceleration for embeddings and re-ranking when a CUDA/MPS device is available (`USE_GPU_ACCELERATION_IF_AVAILABLE`, `GPU_DEVICE_INDEX`), with silent fallback to CPU
 - Store documents in a vector database (chromadb, cosine space)
 - Expose MCP tools for Claude to search and retrieve documents
 - Filter searches by topic/category
@@ -412,6 +413,53 @@ Run `python mcp_server.py --show-config` to print the effective values, or `pyth
 | Query prompt | `EMBEDDING_QUERY_PROMPT` | — | Instruction prefix for queries; empty = the model's built-in `query` prompt (Qwen3 ships one), otherwise no prompt |
 
 > **Cache / offline use:** models are cached in the Hugging Face cache (`~/.cache/huggingface`). `python -m app.download_models` pre-downloads the embedding model, the re-ranker and the tiktoken encoding — the Docker image does this at build time.
+
+### GPU acceleration
+
+Embedding is by far the most expensive step, so the embedding model — and the cross-encoder re-ranker — are placed on a GPU automatically when one is usable.
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| GPU if available | `USE_GPU_ACCELERATION_IF_AVAILABLE` | `True` | Use a CUDA (or Apple MPS) device when one is detected, otherwise run on CPU |
+| GPU index | `GPU_DEVICE_INDEX` | `0` | Which CUDA GPU to use when several are visible (`0` = first); ignored on CPU/MPS |
+
+**What is accelerated:** dense embeddings (indexing, query encoding, and the per-sentence passes of semantic chunking) and cross-encoder re-ranking. **What is not:** BM25 scoring (pure Python) and ChromaDB's local HNSW index (CPU-only in the embedded server).
+
+**Measured gain** — same models, same batch size (32), bf16, NVIDIA RTX 5090 vs. a 16-core CPU:
+
+| Workload | CPU | GPU | Speed-up |
+|---|---|---|---|
+| Embedding 32 chunks (~530 tokens each) — ingest / indexing | 15.5 s | 0.42 s | **37×** |
+| Semantic-chunking sentence passes (200 sentences) | 8.9 s | 0.23 s | **38×** |
+| Embedding one search query (batch 1) | 114 ms | 30 ms | **3.8×** |
+| Cross-encoder re-rank of 50 candidates | 1810 ms | 36 ms | **50×** |
+
+Ingestion and re-ranking are where the win is: on CPU a single search that re-ranks 50 candidates costs ~1.8 s, on a GPU ~36 ms. If you must stay on CPU, consider lowering `RERANKER_TOP_N` (and `EMBEDDING_BATCH_SIZE` if memory is tight).
+
+**How the device is chosen** (`app/device.py`):
+
+1. `USE_GPU_ACCELERATION_IF_AVAILABLE=False` → always CPU.
+2. CUDA available → `cuda:<GPU_DEVICE_INDEX>`; an out-of-range index logs a warning and uses GPU 0 rather than failing.
+3. Apple Silicon → `mps`. 4. Otherwise → CPU.
+
+The chosen device is probed with a tiny allocation, so a CUDA build that cannot actually run (wrong wheel for the GPU architecture, driver mismatch) falls back to CPU with a warning instead of crashing mid-encode. The resolved device is printed on startup (`Compute device: cuda:0 (NVIDIA GeForce RTX 5090, 32 GB VRAM)`) and by `python mcp_server.py --show-config` (`DEVICE=...`).
+
+```bash
+# Force CPU even on a GPU machine
+USE_GPU_ACCELERATION_IF_AVAILABLE=False
+
+# Use the second GPU
+GPU_DEVICE_INDEX=1
+```
+
+> **Requirements:** GPU acceleration needs a CUDA-enabled PyTorch build; the CPU wheel (`torch==…+cpu`) silently reports no CUDA devices. Install one from the PyTorch index matching your driver, e.g. `uv pip install --index-url https://download.pytorch.org/whl/cu128 torch` (Blackwell / RTX 50xx needs CUDA 12.8+), then restart the server. On a GPU you can raise `EMBEDDING_BATCH_SIZE` (64–128) to make ingestion faster still; on CPU the default 32 is safer for memory.
+
+```bash
+# Verify what PyTorch sees
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
+```
+
+**Docker:** the Linux `torch` wheel on PyPI is CUDA-enabled, so exposing the GPU is enough — uncomment the `deploy.resources.reservations.devices` block in [docker-compose.yml](docker-compose.yml) (requires the NVIDIA Container Toolkit on the host), or run `docker run --gpus all …`.
 
 ### Topics
 

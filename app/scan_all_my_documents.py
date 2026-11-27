@@ -256,6 +256,7 @@ def main():
             "SEMANTIC_CHUNK_MAX_SIZE=1024, SEMANTIC_CHUNK_BUFFER_SIZE=1,\n"
             "EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B, EMBEDDING_DIMENSION=1024,\n"
             "EMBEDDING_BATCH_SIZE=32,\n"
+            "USE_GPU_ACCELERATION_IF_AVAILABLE=True, GPU_DEVICE_INDEX=0,\n"
             "USE_RERANKER=True, RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2,\n"
             "RERANKER_TOP_N=50, USE_BM25=True, BM25_WEIGHT=0.3,\n"
             "BM25_K1=1.5, BM25_B=0.75, RRF_K=60,\n"

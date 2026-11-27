@@ -23,6 +23,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 from .config import EMBEDDING_MODEL, EMBEDDING_BATCH_SIZE, EMBEDDING_QUERY_PROMPT
+from .device import describe_device, resolve_device
 
 _model: Optional[SentenceTransformer] = None
 _query_prompt: Optional[str] = None
@@ -33,8 +34,12 @@ def get_embedding_model() -> SentenceTransformer:
     """Return the process-wide embedding model, loading it on first use."""
     global _model
     if _model is None:
-        print(f"Loading embedding model: {EMBEDDING_MODEL}", file=sys.stderr)
-        _model = SentenceTransformer(EMBEDDING_MODEL)
+        device = resolve_device()
+        print(
+            f"Loading embedding model: {EMBEDDING_MODEL} on {describe_device(device)}",
+            file=sys.stderr
+        )
+        _model = SentenceTransformer(EMBEDDING_MODEL, device=device)
     return _model
 
 
