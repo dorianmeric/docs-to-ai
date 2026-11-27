@@ -99,6 +99,7 @@ services:
       - LOG_BACKUP_COUNT=${LOG_BACKUP_COUNT:-5} # what: rotated files kept per log (server.log.1 ...) | options: 1-50 | default: 5
       - LOG_DETAIL_ENABLED=${LOG_DETAIL_ENABLED:-True} # what: write detail.jsonl with every query, candidate and returned chunk | options: True, False | default: True
       - LOG_CHUNK_TEXT_CHARS=${LOG_CHUNK_TEXT_CHARS:-2000} # what: chunk text stored per result in detail.jsonl | options: 0 (no text) to 20000 | default: 2000
+      - SLOW_QUERY_MS=${SLOW_QUERY_MS:-20000} # what: searches slower than this log a WARN with the per-step timing | options: milliseconds | default: 20000
       - LOG_CONSOLE=${LOG_CONSOLE:-True} # what: also print log lines to stderr (docker logs) | options: True, False | default: True
       - MCP_TRANSPORT=${MCP_TRANSPORT:-http} # what: how the server talks to clients | options: http (streamable HTTP on MCP_PORT, recommended in Docker), sse (legacy SSE), stdio (only for `docker exec -i ... uv run --no-sync python mcp_server.py`)
       - MCP_HOST=${MCP_HOST:-0.0.0.0} # what: bind address for the HTTP transport | options: 0.0.0.0 (reachable from the host), 127.0.0.1 (container only)

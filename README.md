@@ -6,32 +6,49 @@ Supported extensions: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb
 
 **Contents**
 
-- [What you can do with it](#what-you-can-do-with-it)
-- [How search works](#how-search-works)
-- [Folder topics: how to search a folder](#folder-topics-how-to-search-a-folder)
-- [Install with local Python](#install-with-local-python)
-- [Install with Docker](#install-with-docker)
-- [Project structure](#project-structure)
-- [MCP tools](#mcp-tools)
-- [Example questions for the LLM](#example-questions-for-the-llm)
-- [Configuration](#configuration)
-  - [Chunking](#chunking)
-  - [Search](#search)
-  - [Embedding model](#embedding-model)
-  - [GPU acceleration](#gpu-acceleration)
-  - [Topics](#topics)
-  - [Storage](#storage)
-  - [Startup behaviour](#startup-behaviour)
-  - [Server transport](#server-transport)
-  - [Example `.env`](#example-env)
-- [Retrieval pipeline](#retrieval-pipeline)
-- [Production RAG settings](#production-rag-settings)
-- [Logs](#logs)
-  - [Log files](#log-files)
-  - [Reading the detail log](#reading-the-detail-log)
-- [Troubleshooting: error messages](#troubleshooting-error-messages)
-- [FAQ: search files and PDFs locally](#faq-search-files-and-pdfs-locally)
-- [License](#license)
+- [Docs-to-AI: local RAG to search local PDFs, Word files, and any folder](#docs-to-ai-local-rag-to-search-local-pdfs-word-files-and-any-folder)
+  - [What you can do with it](#what-you-can-do-with-it)
+  - [How search works](#how-search-works)
+  - [Folder topics: how to search a folder](#folder-topics-how-to-search-a-folder)
+  - [Install with local Python](#install-with-local-python)
+    - [Scan options](#scan-options)
+    - [Pick one transport](#pick-one-transport)
+    - [Claude Desktop config](#claude-desktop-config)
+  - [Install with Docker](#install-with-docker)
+    - [Docker volumes, ports, and env](#docker-volumes-ports-and-env)
+  - [Project structure](#project-structure)
+  - [MCP tools](#mcp-tools)
+  - [Example questions for the LLM](#example-questions-for-the-llm)
+  - [Configuration](#configuration)
+    - [Chunking](#chunking)
+    - [Search](#search)
+    - [Embedding model](#embedding-model)
+    - [GPU acceleration](#gpu-acceleration)
+    - [GPU inside Docker](#gpu-inside-docker)
+    - [Topics](#topics)
+    - [Storage](#storage)
+    - [Startup behaviour](#startup-behaviour)
+    - [Server transport](#server-transport)
+    - [Example `.env`](#example-env)
+  - [Retrieval pipeline](#retrieval-pipeline)
+  - [Production RAG settings](#production-rag-settings)
+  - [Logs](#logs)
+    - [Log files](#log-files)
+    - [Reading the detail log](#reading-the-detail-log)
+  - [Troubleshooting: error messages](#troubleshooting-error-messages)
+  - [FAQ: search files and PDFs locally](#faq-search-files-and-pdfs-locally)
+    - [How do I search my folder for a word or phrase?](#how-do-i-search-my-folder-for-a-word-or-phrase)
+    - [How do I search my files without opening each one?](#how-do-i-search-my-files-without-opening-each-one)
+    - [Can I search local PDFs offline?](#can-i-search-local-pdfs-offline)
+    - [Can I find text inside a scanned PDF?](#can-i-find-text-inside-a-scanned-pdf)
+    - [How do I find something in a PDF when I do not know the page?](#how-do-i-find-something-in-a-pdf-when-i-do-not-know-the-page)
+    - [What file types does it index?](#what-file-types-does-it-index)
+    - [Does this work as a documents RAG for Claude Desktop?](#does-this-work-as-a-documents-rag-for-claude-desktop)
+    - [Do I need a GPU for local RAG?](#do-i-need-a-gpu-for-local-rag)
+    - [How large can a folder be?](#how-large-can-a-folder-be)
+    - [How do I keep the index current?](#how-do-i-keep-the-index-current)
+    - [Why does a search return chunks instead of whole files?](#why-does-a-search-return-chunks-instead-of-whole-files)
+  - [License](#license)
 
 ## What you can do with it
 
@@ -680,6 +697,7 @@ Both files rotate by size. A full file is renamed to `.1`, `.2`, and so on. The 
 | Backups | `LOG_BACKUP_COUNT` | `5` | Rotated files kept per log |
 | Detail log | `LOG_DETAIL_ENABLED` | `True` | Write `detail.jsonl` |
 | Chunk text | `LOG_CHUNK_TEXT_CHARS` | `2000` | Chunk text stored per result, `0` stores none |
+| Slow query | `SLOW_QUERY_MS` | `20000` | A search slower than this logs a `WARN` with the step breakdown |
 
 Docker writes the files to the host because `docker-compose.yml` mounts `./logs` and sets `LOG_DIR=/app/logs`:
 
@@ -693,6 +711,32 @@ Docker writes the files to the host because `docker-compose.yml` mounts `./logs`
 ### Reading the detail log
 
 One `search` record answers "why did the LLM get these chunks?". The record holds the query and the filters. The record holds the candidate count and the timing for every stage. The record holds every returned chunk, with its scores and text.
+
+Every query also logs one line to `server.log` with the time of each step and the total response time, so a saturated server is visible at a glance:
+
+```
+2026-11-27 22:25:43 INFO    [MCP] Search 'PD-ROT-77' -> ok, 1 chunk(s) in 111 ms (prep 0 | encode 80 | chroma 3 | bm25_build 1 | bm25 0 | fuse 0 | dense 83 | filters 0 | rerank 26 | format 0)
+2026-11-27 22:26:07 INFO    [MCP] Search 'PD-ROT-77 2' -> ok, 1 chunk(s) in 109 ms (...) [3 tool calls in flight]
+2026-11-27 22:31:10 WARN  ⚠️ [MCP] Search 'annual report' -> ok, 5 chunk(s) in 6200 ms (...) - over SLOW_QUERY_MS
+```
+
+| Field | Meaning |
+|---|---|
+| `prep_ms` | Time to get the store and read the index size |
+| `encode_ms` | Query embedding on the CPU or GPU |
+| `chroma_ms` | Vector search inside ChromaDB |
+| `bm25_build_ms` | Rebuilding the sparse index, `0` when it is warm |
+| `bm25_ms` | BM25 scoring |
+| `fuse_ms` | RRF fusion plus fetching sparse-only chunks |
+| `dense_ms` | `encode_ms` + `chroma_ms` |
+| `filters_ms` | Phrase, date and regex filters |
+| `rerank_ms` | Cross-encoder re-ranking |
+| `format_ms` | Building the text the LLM receives |
+| `search_ms` | Whole retrieval pipeline |
+| `response_ms` | Whole tool call, from request to response |
+| `concurrent_tool_calls` | Tool calls running when this query arrived |
+| `peak_concurrent_tool_calls` | Highest overlap seen in the process |
+| `steps` | The same numbers as an ordered list |
 
 ```json
 {
@@ -739,11 +783,22 @@ One `search` record answers "why did the LLM get these chunks?". The record hold
 Useful queries (any JSON Lines tool works, `jq` below):
 
 ```bash
-# every query the LLM sent, newest last
-jq -r 'select(.event=="search") | "\(.ts) \(.query) -> \(.returned)/\(.dense_candidates) dense, no BM25-only"' logs/detail.jsonl
+# every query the LLM sent, newest last, with the total response time
+jq -r 'select(.event=="search") | "\(.ts) \(.response_ms) ms  \(.query) -> \(.returned) chunks"' logs/detail.jsonl
 
-# slow searches (more than 500 ms)
-jq 'select(.event=="search" and .total_ms > 500) | {query, total_ms, rerank_ms}' logs/detail.jsonl
+# slow searches (more than 500 ms), with the step breakdown
+jq 'select(.event=="search" and .response_ms > 500) | {query, response_ms, steps}' logs/detail.jsonl
+
+# which step dominates: total time per step over all queries
+jq -r 'select(.event=="search") | .steps[] | "\(.step) \(.ms)"' logs/detail.jsonl \
+  | awk '{sum[$1]+=$2; n[$1]++} END {for (s in sum) printf "%-12s %8.0f ms total  %6.0f ms avg\n", s, sum[s], sum[s]/n[s]}' \
+  | sort -k2 -rn
+
+# queries that ran while other tool calls were in flight
+jq 'select(.event=="search" and .concurrent_tool_calls > 1) | {ts, query, concurrent_tool_calls, response_ms}' logs/detail.jsonl
+
+# highest concurrency seen, per tool
+jq 'select(.event=="tool_call") | {tool, peak_concurrent_tool_calls}' logs/detail.jsonl | sort -u
 
 # queries where BM25 found chunks the dense search missed
 jq 'select(.event=="search" and .sparse_only_candidates > 0) | {query, sparse_only_candidates}' logs/detail.jsonl
@@ -763,7 +818,9 @@ What the numbers tell you:
 - `dense_candidates` far above `returned` with low `rerank_score` means the re-ranker disagreed with the vector search. Try a domain-specific `RERANKER_MODEL`, or `USE_RERANKER=False` to compare.
 - `sparse_only_candidates` above zero means BM25 rescued exact terms the vectors missed. Lower `BM25_WEIGHT` hides those; raise it.
 - `after_topic_filter` at zero means the `topic` filter removed everything. Check the exact topic with `list_topics`.
-- `rerank_ms` dominating `total_ms` means re-ranking is the bottleneck. Lower `RERANKER_TOP_N`, or run on a GPU.
+- `rerank_ms` dominating `response_ms` means re-ranking is the bottleneck. Lower `RERANKER_TOP_N`, or run on a GPU.
+- `response_ms` rising while `encode_ms` and `chroma_ms` stay flat means the machine is queueing work, not searching slowly. Check `peak_concurrent_tool_calls` and the `WARN ... over SLOW_QUERY_MS` lines.
+- `bm25_build_ms` spiking means the sparse index was rebuilt for that query, which happens after every scan or incremental update.
 - `outcome: "empty_index"` means nothing was indexed yet.
 
 ## Troubleshooting: error messages
