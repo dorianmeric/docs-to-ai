@@ -5,7 +5,9 @@ This module contains all the tool function definitions that are exposed
 via the MCP protocol.
 """
 
-from .logging_utils import log_error, log_info
+from .logging_utils import log_error, log_info, log_warn
+import contextvars
+import threading
 import time
 import sys
 from functools import wraps
@@ -20,6 +22,7 @@ from app.config import (
     MAX_SEARCH_RESULTS,
     CHROMA_SPACE,
     LOG_CHUNK_TEXT_CHARS,
+    SLOW_QUERY_MS,
     TOPIC_SEPARATOR,
     FULL_SCAN_ON_BOOT,
     FOLDER_WATCHER_ACTIVE_ON_BOOT
@@ -41,12 +44,30 @@ from app.scan_scheduler import is_scan_in_progress
 DOCS_DIR = str(CONFIGURED_DOCS_DIR)
 
 
+# Per-call context (start time, how many tool calls run at once) so search_documents
+# can report the total response time and spot a saturated server.
+_tool_context: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
+    "tool_context", default=None
+)
+_in_flight = 0
+_in_flight_peak = 0
+_in_flight_lock = threading.Lock()
+
+
 def logged_tool(func):
     """Record every tool call in server.log and detail.jsonl, with its duration."""
 
     @wraps(func)
     def wrapper(*args, **kwargs) -> Any:
+        global _in_flight, _in_flight_peak
+
+        with _in_flight_lock:
+            _in_flight += 1
+            _in_flight_peak = max(_in_flight_peak, _in_flight)
+            in_flight = _in_flight
+
         started = time.perf_counter()
+        token = _tool_context.set({'started': started, 'in_flight': in_flight})
         call_args = {name: value for name, value in zip(func.__code__.co_varnames, args)}
         call_args.update(kwargs)
 
@@ -57,13 +78,19 @@ def logged_tool(func):
             result = func(*args, **kwargs)
         except Exception as exc:
             log_detail("tool_call", tool=func.__name__, args=call_args, ok=False,
-                       error=f"{type(exc).__name__}: {exc}", duration_ms=duration_ms())
+                       error=f"{type(exc).__name__}: {exc}", duration_ms=duration_ms(),
+                       concurrent_tool_calls=in_flight, peak_concurrent_tool_calls=_in_flight_peak)
             raise
+        finally:
+            _tool_context.reset(token)
+            with _in_flight_lock:
+                _in_flight -= 1
 
         text = str(result)
         log_info(f"Tool {func.__name__} finished in {duration_ms()} ms", component="MCP")
         log_detail("tool_call", tool=func.__name__, args=call_args, ok=True,
-                   duration_ms=duration_ms(), result_chars=len(text))
+                   duration_ms=duration_ms(), result_chars=len(text),
+                   concurrent_tool_calls=in_flight, peak_concurrent_tool_calls=_in_flight_peak)
         return result
 
     return wrapper
@@ -131,9 +158,15 @@ def search_documents(
         date_to: Optional: Filter to documents modified before this timestamp
         regex_pattern: Optional: Filter results by regex pattern in text content
     """
-    vector_store = VectorStore()
+    tool_context = _tool_context.get() or {}
+    tool_started = tool_context.get('started', time.perf_counter())
+    concurrent = tool_context.get('in_flight')
 
-    search_started = time.perf_counter()
+    prep_started = time.perf_counter()
+    vector_store = VectorStore()
+    index_size = vector_store.collection.count()
+    prep_ms = round((time.perf_counter() - prep_started) * 1000, 2)
+
     trace: Dict[str, Any] = {
         'query': query,
         'query_chars': len(query),
@@ -143,20 +176,41 @@ def search_documents(
         'date_from': date_from,
         'date_to': date_to,
         'regex_pattern': regex_pattern,
-        'index_size': vector_store.collection.count(),
+        'index_size': index_size,
+        'prep_ms': prep_ms,
+        'concurrent_tool_calls': concurrent,
     }
+
+    step_order = (
+        'prep_ms', 'encode_ms', 'chroma_ms', 'bm25_build_ms', 'bm25_ms', 'fuse_ms',
+        'dense_ms', 'filters_ms', 'rerank_ms', 'format_ms',
+    )
 
     def log_search(outcome: str, results: list) -> None:
         trace['outcome'] = outcome
         trace['results'] = [_chunk_record(rank, item) for rank, item in enumerate(results, 1)]
-        trace['duration_ms'] = round((time.perf_counter() - search_started) * 1000, 2)
-        log_detail("search", **trace)
-        log_info(
-            f"Search '{query[:60]}' -> {outcome}, {len(results)} chunk(s) in {trace['duration_ms']} ms",
-            component="MCP",
-        )
+        trace['search_ms'] = trace.get('total_ms')
+        trace['response_ms'] = round((time.perf_counter() - tool_started) * 1000, 2)
+        trace['steps'] = [
+            {'step': name[:-3], 'ms': trace[name]} for name in step_order if name in trace
+        ]
 
-    if vector_store.collection.count() == 0:
+        log_detail("search", **trace)
+
+        breakdown = " | ".join(f"{item['step']} {item['ms']:.0f}" for item in trace['steps'])
+        summary = (
+            f"Search '{query[:60]}' -> {outcome}, {len(results)} chunk(s) in "
+            f"{trace['response_ms']:.0f} ms ({breakdown})"
+        )
+        if concurrent and concurrent > 1:
+            summary += f" [{concurrent} tool calls in flight]"
+
+        if trace['response_ms'] > SLOW_QUERY_MS:
+            log_warn(summary + " - over SLOW_QUERY_MS", component="MCP")
+        else:
+            log_info(summary, component="MCP")
+
+    if index_size == 0:
         log_search("empty_index", [])
         return format_message(
             f"The index is empty, so '{query}' could not match anything.",
@@ -200,7 +254,7 @@ def search_documents(
                 "phrase, or regex filter to widen the search.",
         )
 
-    log_search("ok", results)
+    format_started = time.perf_counter()
 
     filter_parts = []
     if topic:
@@ -242,7 +296,10 @@ def search_documents(
 
         response_parts.append(f"\nContent:\n{result['text']}")
 
-    return "\n".join(response_parts)
+    response = "\n".join(response_parts)
+    trace['format_ms'] = round((time.perf_counter() - format_started) * 1000, 2)
+    log_search("ok", results)
+    return response
 
 
 @friendly_errors

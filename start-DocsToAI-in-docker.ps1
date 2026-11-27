@@ -10,12 +10,27 @@ if (wsl -e id -u 2>$null) {
   $env:MY_GID = 1000
 }
 
+
+
+
+
 docker-compose build
+
+
+
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "`nBuild successful!" -ForegroundColor Green
     Write-Host "`nStarting MCP server in detached mode..." -ForegroundColor Green
-    docker-compose up -d
+    
+
+
+
+   # docker-compose up -d
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d # for GPU support
+
+
+    
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`nContainer started successfully!" -ForegroundColor Green

@@ -321,16 +321,25 @@ class VectorStore:
         if ids:
             log_success(f"BM25 index built over {len(ids)} chunks", component="VectorStore")
 
-    def _dense_search(self, query: str, n_results: int) -> List[Dict]:
+    def _dense_search(self, query: str, n_results: int,
+                      trace: Optional[Dict[str, Any]] = None) -> List[Dict]:
         """Vector search over the ChromaDB collection (cosine distance)."""
         if n_results <= 0 or self.collection.count() == 0:
             return []
 
+        encode_started = time.perf_counter()
+        query_embedding = encode_one_query(query)
+        if trace is not None:
+            trace['encode_ms'] = round((time.perf_counter() - encode_started) * 1000, 2)
+
         try:
+            chroma_started = time.perf_counter()
             results = self.collection.query(
-                query_embeddings=[encode_one_query(query)],
+                query_embeddings=[query_embedding],
                 n_results=n_results
             )
+            if trace is not None:
+                trace['chroma_ms'] = round((time.perf_counter() - chroma_started) * 1000, 2)
         except Exception as exc:
             raise DocsToAIError(
                 problem=f"The vector search for '{query}' failed.",
@@ -481,25 +490,31 @@ class VectorStore:
         })
 
         dense_started = time.perf_counter()
-        dense_results = self._dense_search(query, search_n_results)
+        dense_results = self._dense_search(query, search_n_results, trace=trace)
         trace['dense_candidates'] = len(dense_results)
         trace['dense_ms'] = round((time.perf_counter() - dense_started) * 1000, 2)
         formatted_results = dense_results
 
         if self.bm25 is not None:
-            bm25_started = time.perf_counter()
+            bm25_build_started = time.perf_counter()
             self._ensure_bm25()
+            trace['bm25_build_ms'] = round((time.perf_counter() - bm25_build_started) * 1000, 2)
+
+            bm25_started = time.perf_counter()
             bm25_hits = [chunk_id for chunk_id, _score in self.bm25.search(query, search_n_results)]
             trace['bm25_candidates'] = len(bm25_hits)
             trace['bm25_ms'] = round((time.perf_counter() - bm25_started) * 1000, 2)
             if bm25_hits:
+                fuse_started = time.perf_counter()
                 formatted_results = self._fuse_rrf(dense_results, bm25_hits, search_n_results)
+                trace['fuse_ms'] = round((time.perf_counter() - fuse_started) * 1000, 2)
                 trace['fused_candidates'] = len(formatted_results)
                 trace['sparse_only_candidates'] = len(
                     {cid for cid in bm25_hits} - {r['id'] for r in dense_results}
                 )
 
         trace['before_filters'] = len(formatted_results)
+        filters_started = time.perf_counter()
         
         if phrase_search:
             phrase_query = query.strip('"').lower()
@@ -532,6 +547,7 @@ class VectorStore:
                 pass
         
         trace['after_filters'] = len(formatted_results)
+        trace['filters_ms'] = round((time.perf_counter() - filters_started) * 1000, 2)
         trace['filters'] = {
             'phrase_search': bool(phrase_search),
             'date_from': date_from,

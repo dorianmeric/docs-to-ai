@@ -177,6 +177,7 @@ HNSW_EF_CONSTRUCTION = _env_int('HNSW_EF_CONSTRUCTION', 200)  # Build-time candi
 # Logging Configuration
 # One folder holds the rotating server log and the structured detail log. In
 # Docker it is bind-mounted, so the files land on the host.
+SLOW_QUERY_MS = _env_int('SLOW_QUERY_MS', 5000)  # warn when one search takes longer than this
 LOG_DIR = Path(os.getenv('LOG_DIR', str(BASE_DIR / "logs")))
 LOG_DIR.mkdir(exist_ok=True, parents=True)
 LOG_LEVEL = _env_str('LOG_LEVEL', 'INFO').upper()  # DEBUG, INFO, WARNING, ERROR
