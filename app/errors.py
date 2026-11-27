@@ -202,6 +202,16 @@ def explain(exc: BaseException, context: Optional[str] = None) -> str:
             details=text,
         )
 
+    if "address already in use" in lowered or "errno 98" in lowered or "errno 10048" in lowered:
+        return format_message(
+            f"The MCP port is already taken{where}.",
+            cause="Another MCP server, or a second copy of this one, is listening on the same port.",
+            fix="Stop the other process or container, or set MCP_PORT to a free port (and update the client URL). "
+                "Inside Docker, one server per container is enough: connect to http://localhost:38777/mcp "
+                "instead of starting a second one.",
+            details=text,
+        )
+
     if "database is locked" in lowered or "unable to open database file" in lowered:
         return format_message(
             f"The vector database is locked or unreadable{where}.",

@@ -253,14 +253,14 @@ The container keeps running and serves MCP at `http://localhost:38777/mcp`. Poin
 }
 ```
 
-A client that only speaks stdio can run the server inside the running container instead. This reuses the same container, mounts, and index:
+A client that only speaks stdio can run the server inside the running container instead. This reuses the same container, mounts, and index. Two things matter in the command. It goes through `uv run`, because the image keeps its packages in a virtualenv. It sets `MCP_TRANSPORT=stdio`, because the container already owns the HTTP port.
 
 ```json
 {
   "mcpServers": {
     "docs-to-ai": {
       "command": "docker",
-      "args": ["exec", "-i", "docs-to-ai", "python", "mcp_server.py"]
+      "args": ["exec", "-e", "MCP_TRANSPORT=stdio", "-i", "docs-to-ai", "uv", "run", "--no-sync", "python", "mcp_server.py"]
     }
   }
 }
@@ -688,7 +688,7 @@ The server explains each failure in three parts: what happened, the likely cause
 | `The folder watcher could not start for '<path>'.` | The folder is missing or unreadable, or `watchdog` is not installed. | Create the folder and check `DOCS_DIR`. Run `uv sync`. Then call `start_watching_folder` again. |
 | `Cached text for '<file>' is unreadable.` | A cache entry was truncated, for example by a crash. | No action needed. The scan re-extracts the file and rewrites the cache entry. |
 | `Compute device: cpu (no GPU detected)` in the log | PyTorch has no CUDA device: CPU-only wheel, or no driver. | Install a CUDA wheel: `uv pip install --index-url https://download.pytorch.org/whl/cu128 torch`. |
-| A new container starts for every LLM connection, and it sees no documents | The client config runs `docker run -i --rm mcp/docs-to-ai`. `docker run` creates a fresh container per connection, with no volumes and no index. | Point the client at the running container instead: `"url": "http://localhost:38777/mcp", "transport": "http"`, or use `docker exec -i docs-to-ai python mcp_server.py` for stdio. |
+| A new container starts for every LLM connection, and it sees no documents | The client config runs `docker run -i --rm mcp/docs-to-ai`. `docker run` creates a fresh container per connection, with no volumes and no index. | Point the client at the running container instead: `"url": "http://localhost:38777/mcp", "transport": "http"`, or use `docker exec -e MCP_TRANSPORT=stdio -i docs-to-ai uv run --no-sync python mcp_server.py` for stdio. |
 | `Connection refused` or `Failed to connect to localhost:38777` | The server runs with `MCP_TRANSPORT=stdio`, so nothing listens on the port. | Start it with `MCP_TRANSPORT=http` (the Docker compose file does this) and check the startup log for `Listening on 0.0.0.0:38777/mcp`. |
 | The startup log shows `Listening on 127.0.0.1:...` and the host cannot connect | `MCP_HOST=127.0.0.1` binds inside the container only. | Set `MCP_HOST=0.0.0.0`. |
 | `No GPU is visible inside this container` in the log | Docker started the container without the GPU device reservation, so `/dev/nvidia*` does not exist inside it. | Add the override: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`. Or set `COMPOSE_FILE` in `.env` (`;` between files on Windows, `:` on Linux/macOS). Or add `--gpus all` to `docker run`. |

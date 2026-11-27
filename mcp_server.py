@@ -7,6 +7,7 @@ information from a collection of documents stored in a vector database.
 """
 
 import asyncio
+import errno
 import os
 import socket
 import sys
@@ -196,6 +197,17 @@ def _local_address() -> str | None:
         return None
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    """True when something already accepts connections on host:port."""
+    target = "127.0.0.1" if host in {"", "0.0.0.0", "::"} else host
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1.0)
+            return sock.connect_ex((target, port)) == 0
+    except OSError:
+        return False
+
+
 def _log_listen_addresses(host: str, port: int, mode: str) -> None:
     """Say where the server listens, inside the container and from the host."""
     path = MCP_HTTP_PATH.get(mode, "/mcp")
@@ -358,13 +370,28 @@ async def main():
             i += 1
 
     if transport in {"http", "sse"}:
+        if _port_in_use(host, port):
+            from app.errors import explain
+            log_error(
+                explain(
+                    OSError(errno.EADDRINUSE, "address already in use"),
+                    context=f"MCP server on port {port}",
+                ),
+                component="MCP Server",
+            )
+            raise SystemExit(1)
         _log_listen_addresses(host, port, transport)
-        await mcp.run_http_async(
-            transport="sse" if transport == "sse" else "http",
-            host=host,
-            port=port,
-            path=MCP_HTTP_PATH[transport],
-        )
+        try:
+            await mcp.run_http_async(
+                transport="sse" if transport == "sse" else "http",
+                host=host,
+                port=port,
+                path=MCP_HTTP_PATH[transport],
+            )
+        except OSError as exc:
+            from app.errors import explain
+            log_error(explain(exc, context=f"MCP server on port {port}"), component="MCP Server")
+            raise SystemExit(1)
     else:
         log_info(
             "Transport: stdio. The client starts this process and talks over stdin/stdout; "

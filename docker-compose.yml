@@ -92,7 +92,7 @@ services:
       - USE_FOLDER_AS_TOPIC=${USE_FOLDER_AS_TOPIC:-True} # what: build topic tags from folder names | options: True, False
       - DEFAULT_TOPIC=${DEFAULT_TOPIC:-uncategorized} # what: topic for documents outside known folders | options: any label
       - CHROMA_COLLECTION_NAME=${CHROMA_COLLECTION_NAME:-my-documents} # what: ChromaDB collection name | options: any name (a new name starts an empty index)
-      - MCP_TRANSPORT=${MCP_TRANSPORT:-http} # what: how the server talks to clients | options: http (streamable HTTP on MCP_PORT, recommended in Docker), sse (legacy SSE), stdio (client spawns the process)
+      - MCP_TRANSPORT=${MCP_TRANSPORT:-http} # what: how the server talks to clients | options: http (streamable HTTP on MCP_PORT, recommended in Docker), sse (legacy SSE), stdio (only for `docker exec -i ... uv run --no-sync python mcp_server.py`)
       - MCP_HOST=${MCP_HOST:-0.0.0.0} # what: bind address for the HTTP transport | options: 0.0.0.0 (reachable from the host), 127.0.0.1 (container only)
       - MCP_PORT=${MCP_PORT:-38777} # what: port for the HTTP transport, inside the container | options: 1-65535
       # - MCP_PUBLIC_URL=http://myserver.lan:38777/mcp # what: the client URL printed at startup | options: any URL; needed only behind a proxy or a remapped host port
