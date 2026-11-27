@@ -10,7 +10,8 @@ from .config import (
     CHUNKING_STRATEGY, CHUNK_BY_TOKEN, TOKENIZER_MODEL, PRESERVE_HEADINGS, 
     MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE,
     SEMANTIC_CHUNK_PERCENTILE, SEMANTIC_CHUNK_MIN_SIZE, SEMANTIC_CHUNK_MAX_SIZE,
-    SEMANTIC_CHUNK_BUFFER_SIZE
+    SEMANTIC_CHUNK_BUFFER_SIZE,
+    OCR_ENABLED, OCR_DPI, OCR_LANG, OCR_MAX_PAGES, OCR_MIN_TEXT_CHARS
 )
 
 from .errors import explain
@@ -32,12 +33,31 @@ except ImportError:
     TIKTOKEN_AVAILABLE = False
 
 
+# Bumped when the shape of a cache entry changes. A cache entry also records
+# the settings that produced its text, so turning OCR on re-reads the PDFs that
+# were cached as empty instead of keeping them unsearchable.
+CACHE_FORMAT_VERSION = 2
+
 _ENCODINGS: Dict[str, Any] = {}
 _ENCODING_FAILURES = 0
 _ENCODING_MAX_FAILURES = 3
 # Rough English/code ratio used when tiktoken data cannot be fetched (e.g. the
 # container runs offline and the BPE files were not baked into the image).
 CHARS_PER_TOKEN = 4
+
+
+def extraction_cache_key(extension: str) -> str:
+    """Signature of the settings that change the text extracted from a file type.
+
+    The key is per file type because OCR settings only affect PDFs: changing
+    ``OCR_DPI`` must not throw away the cached text of every Word file.
+    """
+    if extension == '.pdf':
+        return (
+            f"v{CACHE_FORMAT_VERSION}:pdf:ocr={int(bool(OCR_ENABLED))}:dpi={OCR_DPI}:"
+            f"lang={OCR_LANG}:min={OCR_MIN_TEXT_CHARS}:max_pages={OCR_MAX_PAGES}"
+        )
+    return f"v{CACHE_FORMAT_VERSION}:{extension}"
 
 
 def _get_encoding():
@@ -157,26 +177,16 @@ class DocumentProcessor:
         file_size = doc_file.stat().st_size
         last_modified = doc_file.stat().st_mtime
 
-        # Check cache
-        cache_file = self._get_cache_path(doc_file)
-        if cache_file.exists():
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as handle:
-                    cached_data = json.load(handle)
-                # Update topics in cached data in case folder structure changed
-                for page_data in cached_data:
-                    page_data['metadata']['topics'] = topics
-                    page_data['metadata']['file_size'] = file_size
-                    page_data['metadata']['last_modified'] = last_modified
-                return cached_data
-            except (json.JSONDecodeError, OSError, KeyError) as exc:
-                # A damaged cache entry must not stop the scan: drop it and re-extract
-                log_warn(
-                    f"Cached text for '{doc_file.name}' is unreadable ({type(exc).__name__}). "
-                    "The file is re-extracted and the cache rewritten.",
-                    component="Chunker",
-                )
-                cache_file.unlink(missing_ok=True)
+        # Check cache, which is only reused when it was written with the
+        # extraction settings in use now (for PDFs: whether OCR was on, and how)
+        cached_data = self._read_cached_pages(self._get_cache_path(doc_file), doc_file)
+        if cached_data is not None:
+            # Update topics in cached data in case folder structure changed
+            for page_data in cached_data:
+                page_data['metadata']['topics'] = topics
+                page_data['metadata']['file_size'] = file_size
+                page_data['metadata']['last_modified'] = last_modified
+            return cached_data
 
         # Determine file type and extract text
         extension = doc_file.suffix.lower()
@@ -212,6 +222,7 @@ class DocumentProcessor:
                 'page': page_data['page'],
                 'text': page_data['text'],
                 'metadata': {
+                    'is_ocr': bool(page_data.get('ocr', False)),
                     'filename': doc_file.name,
                     'filepath': str(doc_file),
                     'topics': topics,
@@ -625,6 +636,53 @@ class DocumentProcessor:
         doc_hash = hashlib.md5(str(doc_path).encode()).hexdigest()
         return self.cache_dir / f"{doc_hash}.json"
 
+    def _read_cached_pages(self, cache_file: Path, doc_file: Path) -> Optional[List[Dict]]:
+        """Cached pages, or None when the entry is missing, damaged, or stale."""
+        if not cache_file.exists():
+            return None
+
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as handle:
+                cached = json.load(handle)
+        except (json.JSONDecodeError, OSError, KeyError) as exc:
+            # A damaged cache entry must not stop the scan: drop it and re-extract
+            log_warn(
+                f"Cached text for '{doc_file.name}' is unreadable ({type(exc).__name__}). "
+                "The file is re-extracted and the cache rewritten.",
+                component="Chunker",
+            )
+            cache_file.unlink(missing_ok=True)
+            return None
+
+        extension = doc_file.suffix.lower()
+        pages = cached.get('pages') if isinstance(cached, dict) else cached
+        if not isinstance(pages, list):
+            cache_file.unlink(missing_ok=True)
+            return None
+
+        if isinstance(cached, dict):
+            if cached.get('extraction_key') == extraction_cache_key(extension):
+                return pages
+            log_info(
+                f"Extraction settings changed since '{doc_file.name}' was cached; "
+                "the file is read again",
+                component="Chunker",
+            )
+            return None
+
+        # Cache written before entries recorded their settings. Reuse it unless
+        # OCR is now on and a page was cached empty: that page is a scan OCR can
+        # fill in. The re-read happens once, then the entry carries a key.
+        if extension == '.pdf' and OCR_ENABLED and any(
+            not str(page.get('text') or '').strip() for page in pages
+        ):
+            log_info(
+                f"'{doc_file.name}' was cached with no text and OCR is now on; the file is read again",
+                component="Chunker",
+            )
+            return None
+        return pages
+
     def _cache_extracted_text_safe(self, doc_path: Path, pages_data: List[Dict]) -> None:
         """Cache extracted text, and tolerate an unwritable cache folder."""
         try:
@@ -634,10 +692,14 @@ class DocumentProcessor:
             log_warn(explain(exc, context="cache write"), component="Chunker")
     
     def _cache_extracted_text(self, doc_path: Path, pages_data: List[Dict]):
-        """Cache extracted text to avoid reprocessing."""
+        """Cache extracted text, tagged with the settings that produced it."""
         cache_file = self._get_cache_path(doc_path)
+        payload = {
+            'extraction_key': extraction_cache_key(doc_path.suffix.lower()),
+            'pages': pages_data,
+        }
         with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump(pages_data, f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

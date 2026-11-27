@@ -44,6 +44,11 @@ services:
         FOLDER_WATCHER_ACTIVE_ON_BOOT: ${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True}  # what: watch DOCS_DIR and index changes when the server starts | options: True, False
         DEBOUNCE_SECONDS: ${DEBOUNCE_SECONDS:-10}  # what: idle time after the last file change before it is processed | options: integer seconds
         FULL_SCAN_INTERVAL_DAYS: ${FULL_SCAN_INTERVAL_DAYS:-7}  # what: days between automatic full rescans while the watcher runs | options: integer days
+        OCR_ENABLED: ${OCR_ENABLED:-True}  # what: read scanned PDFs with Tesseract OCR when a page has no text layer | options: True, False
+        OCR_MIN_TEXT_CHARS: ${OCR_MIN_TEXT_CHARS:-20}  # what: a page with less text than this is treated as a scan and OCR runs on it | options: 0-200 (20-50 catches stamps and headers)
+        OCR_DPI: ${OCR_DPI:-300}  # what: resolution the page is rendered at before OCR | options: 150-600 (higher = more accurate, slower)
+        OCR_LANG: ${OCR_LANG:-eng}  # what: Tesseract language pack(s) used for OCR | options: any installed pack, combine with + e.g. deu+eng; the image ships eng only
+        OCR_MAX_PAGES: ${OCR_MAX_PAGES:-9999}  # what: ceiling on scanned pages OCR reads per document; 0 turns OCR off | options: any integer (9999 = no practical limit)
     container_name: docs-to-ai
     image: mcp/docs-to-ai
 
@@ -109,6 +114,11 @@ services:
       - FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT:-True} # what: start the folder watcher at server start | options: True, False
       - DEBOUNCE_SECONDS=${DEBOUNCE_SECONDS:-10} # what: idle time after the last file change | options: integer seconds
       - FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS:-7} # what: days between automatic full rescans | options: integer days
+      - OCR_ENABLED=${OCR_ENABLED:-True} # what: read scanned PDFs with Tesseract OCR when a page has no text layer | options: True, False
+      - OCR_MIN_TEXT_CHARS=${OCR_MIN_TEXT_CHARS:-20} # what: a page with less text than this is treated as a scan | options: 0-200
+      - OCR_DPI=${OCR_DPI:-300} # what: resolution the page is rendered at before OCR | options: 150-600 (higher = more accurate, slower)
+      - OCR_LANG=${OCR_LANG:-eng} # what: Tesseract language pack(s) | options: any installed pack, combine with + e.g. deu+eng (the image ships eng)
+      - OCR_MAX_PAGES=${OCR_MAX_PAGES:-9999} # what: ceiling on scanned pages OCR reads per document | options: any integer (9999 = no practical limit, 0 turns OCR off)
 
     # Stdin/stdout, only used when a client runs the server over stdio inside
     # this container with `docker exec -i`.

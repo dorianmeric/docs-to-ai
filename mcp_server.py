@@ -30,6 +30,9 @@ from app.mcp_tools import (
     list_documents as _list_documents,
     list_topics as _list_topics,
     get_collection_stats as _get_collection_stats,
+    get_document as _get_document,
+    get_document_metadata as _get_document_metadata,
+    get_document_file as _get_document_file,
     scan_all_my_documents as _scan_all_my_documents,
     start_watching_folder as _start_watching_folder,
     stop_watching_folder as _stop_watching_folder,
@@ -123,6 +126,39 @@ def search_documents(query: str, max_results: int = 10, topic: str | None = None
 def list_documents(topic: str | None = None) -> str:
     """Get a list of all available documents with their hierarchical topics."""
     return _list_documents(topic)
+
+
+@mcp.tool()
+def get_document_metadata(document: str) -> str:
+    """Get the metadata of one indexed document: dates, size, topics, chunk count.
+
+    Args:
+        document: Filename, path, or part of either, as returned by list_documents
+    """
+    return _get_document_metadata(document)
+
+
+@mcp.tool()
+def get_document(document: str, page: int | None = None, max_chars: int = 0) -> str:
+    """Get one document in full, with its metadata.
+
+    Args:
+        document: Filename, path, or part of either, as returned by list_documents
+        page: Optional: return only this page (1-based)
+        max_chars: Optional: cut the text after this many characters (0 = no limit)
+    """
+    return _get_document(document, page, max_chars)
+
+
+@mcp.tool()
+def get_document_file(document: str, max_bytes: int = 1_000_000) -> str:
+    """Get the original document file as base64, with its metadata.
+
+    Args:
+        document: Filename, path, or part of either, as returned by list_documents
+        max_bytes: Refuse files larger than this (default 1 MB)
+    """
+    return _get_document_file(document, max_bytes)
 
 
 @mcp.tool()
@@ -226,12 +262,25 @@ def _log_listen_addresses(host: str, port: int, mode: str) -> None:
     log_success("\n".join(lines), component="MCP Server")
 
 
+def _log_ocr_status() -> None:
+    """Say once, at startup, whether scanned PDFs can be read."""
+    from app.config import OCR_ENABLED, OCR_MAX_PAGES
+    if not OCR_ENABLED:
+        log_info("OCR is disabled (OCR_ENABLED=False): scanned PDF pages stay empty", component="OCR")
+        return
+    if OCR_MAX_PAGES <= 0:
+        log_warn("OCR_MAX_PAGES=0 turns OCR off: scanned PDF pages stay empty", component="OCR")
+        return
+    from app.ocr import ocr_status
+    ocr_status()  # logs the engine, version, and language once
+
+
 def _log_startup_detail(transport: str, host: str, port: int) -> None:
     """Record the effective configuration once, so a log shows how the run started."""
     from app.config import (
         CHROMA_COLLECTION_NAME, CHUNKING_STRATEGY, EMBEDDING_MODEL, FOLDER_WATCHER_ACTIVE_ON_BOOT,
         FULL_SCAN_ON_BOOT, LOG_CHUNK_TEXT_CHARS, LOG_DETAIL_ENABLED, LOG_DIR, RERANKER_MODEL,
-        USE_BM25, USE_RERANKER,
+        USE_BM25, USE_RERANKER, OCR_ENABLED, OCR_DPI, OCR_LANG, OCR_MAX_PAGES, OCR_MIN_TEXT_CHARS,
     )
     log_detail(
         "server_start",
@@ -246,6 +295,13 @@ def _log_startup_detail(transport: str, host: str, port: int) -> None:
         reranker=RERANKER_MODEL if USE_RERANKER else None,
         full_scan_on_boot=FULL_SCAN_ON_BOOT,
         folder_watcher=FOLDER_WATCHER_ACTIVE_ON_BOOT,
+        ocr={
+            'enabled': OCR_ENABLED,
+            'min_text_chars': OCR_MIN_TEXT_CHARS,
+            'dpi': OCR_DPI,
+            'lang': OCR_LANG,
+            'max_pages': OCR_MAX_PAGES,
+        },
         log_dir=str(LOG_DIR),
         detail_log=LOG_DETAIL_ENABLED,
         chunk_text_chars=LOG_CHUNK_TEXT_CHARS,
@@ -255,6 +311,7 @@ def _log_startup_detail(transport: str, host: str, port: int) -> None:
 async def main():
     """Main entry point - determine transport type from environment or arguments."""
     setup_logging()
+    _log_ocr_status()
     transport = _transport_mode(os.getenv("MCP_TRANSPORT", "stdio"))
 
     if len(sys.argv) > 1:
@@ -289,6 +346,12 @@ async def main():
             print("  SEMANTIC_CHUNK_MIN_SIZE    Min tokens per semantic chunk (default: 64)")
             print("  SEMANTIC_CHUNK_MAX_SIZE    Max tokens per semantic chunk (default: 1024)")
             print("  SEMANTIC_CHUNK_BUFFER_SIZE Neighbouring sentences combined for similarity (default: 1)")
+            print("\nOCR for scanned PDFs (defaults shown):")
+            print("  OCR_ENABLED             Run OCR on PDF pages with no usable text layer (default: True)")
+            print("  OCR_MIN_TEXT_CHARS      A page below this many characters counts as a scan (default: 20)")
+            print("  OCR_DPI                 Resolution the page is rendered at before OCR (default: 300)")
+            print("  OCR_LANG                Tesseract language pack(s), e.g. eng or deu+eng (default: eng)")
+            print("  OCR_MAX_PAGES           Ceiling on OCR pages per document, 0 turns it off (default: 9999)")
             print("\nSearch (defaults shown):")
             print("  DEFAULT_SEARCH_RESULTS  Default number of results (default: 10)")
             print("  MAX_SEARCH_RESULTS      Maximum allowed results (default: 20)")
@@ -335,7 +398,8 @@ async def main():
                 CHUNKING_STRATEGY, CHUNK_SIZE, CHUNK_OVERLAP, CHUNK_BY_TOKEN,
                 TOKENIZER_MODEL, PRESERVE_HEADINGS, MAX_HEADING_CHUNK_SIZE, MIN_CHUNK_SIZE,
                 SEMANTIC_CHUNK_PERCENTILE, SEMANTIC_CHUNK_MIN_SIZE, SEMANTIC_CHUNK_MAX_SIZE,
-                SEMANTIC_CHUNK_BUFFER_SIZE, EMBEDDING_MODEL, EMBEDDING_DIMENSION,
+                SEMANTIC_CHUNK_BUFFER_SIZE, OCR_ENABLED, OCR_MIN_TEXT_CHARS, OCR_DPI, OCR_LANG,
+                OCR_MAX_PAGES, EMBEDDING_MODEL, EMBEDDING_DIMENSION,
                 EMBEDDING_BATCH_SIZE, EMBEDDING_QUERY_PROMPT,
                 USE_GPU_ACCELERATION_IF_AVAILABLE, GPU_DEVICE_INDEX,
                 DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, USE_RERANKER, RERANKER_MODEL,
@@ -371,6 +435,17 @@ async def main():
             print(f"  SEMANTIC_CHUNK_MIN_SIZE={SEMANTIC_CHUNK_MIN_SIZE}")
             print(f"  SEMANTIC_CHUNK_MAX_SIZE={SEMANTIC_CHUNK_MAX_SIZE}")
             print(f"  SEMANTIC_CHUNK_BUFFER_SIZE={SEMANTIC_CHUNK_BUFFER_SIZE}")
+            print(f"  OCR_ENABLED={OCR_ENABLED}")
+            print(f"  OCR_MIN_TEXT_CHARS={OCR_MIN_TEXT_CHARS}")
+            print(f"  OCR_DPI={OCR_DPI}")
+            print(f"  OCR_LANG={OCR_LANG}")
+            print(f"  OCR_MAX_PAGES={OCR_MAX_PAGES}")
+            try:
+                from app.ocr import ocr_status
+                ok, detail = ocr_status()
+                print(f"  OCR_STATUS={'ready' if ok else 'unavailable'} ({detail})")
+            except Exception as e:  # OCR is optional: never fail --show-config on it
+                print(f"  OCR_STATUS=unknown ({e})")
             print(f"  DEFAULT_SEARCH_RESULTS={DEFAULT_SEARCH_RESULTS}")
             print(f"  MAX_SEARCH_RESULTS={MAX_SEARCH_RESULTS}")
             print(f"  USE_RERANKER={USE_RERANKER}")

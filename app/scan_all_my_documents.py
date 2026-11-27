@@ -223,11 +223,17 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
                 )
             else:
                 # Document was read but yielded no text (empty file, image-only PDF, ..)
+                ocr_hint = (
+                    "A scanned PDF has no text layer. OCR reads it only when OCR_ENABLED=True and "
+                    "Tesseract is installed (the Docker image includes it). A page whose scan is "
+                    "too faint, or OCR_MAX_PAGES=0, also leaves the text empty."
+                    if ext == '.pdf' else
+                    "Check that the file is not empty and holds text."
+                )
                 response_parts.append(
                     "  " + format_inline(
                         f"No text could be extracted from '{doc_file.name}'.",
-                        fix="Check that the file is not empty. A scanned PDF has no text layer: run OCR on it, "
-                            "save a searchable PDF, then scan again.",
+                        fix=ocr_hint,
                     )
                 )
                 log_detail(
@@ -316,11 +322,30 @@ def scan_all(doc_dir: str | Path = DOCS_DIR, reset_database: bool = True):
     # Return all collected messages as a single string
     return f"\n".join(response_parts)
 
+def _utf8_console() -> None:
+    """Let the report print on a console that is not UTF-8 (Windows cp1252).
+
+    The report contains ticks and warning marks, which raise UnicodeEncodeError
+    on a legacy code page. Replacing the odd character is better than losing the
+    whole report.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def main():
     """
     Command-line entry point for the document ingestion script.
     Parses arguments and initiates the scan process.
     """
+    _utf8_console()
+
     # Set up command-line argument parser
     parser = argparse.ArgumentParser(
         description="Ingest documents (PDF, Word, Markdown, Excel) into the vector store",

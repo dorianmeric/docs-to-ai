@@ -3,8 +3,11 @@
 
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
-# Install only runtime dependencies for Debian
-RUN apt-get update && apt-get install -y --no-install-recommends libmupdf-dev libfreetype6 libharfbuzz0b libopenjp2-7 libjbig2dec0 libjpeg62-turbo zlib1g 
+# Install only runtime dependencies for Debian. tesseract-ocr reads scanned
+# PDFs, tesseract-ocr-eng is the English language pack; add more packs (e.g.
+# tesseract-ocr-deu) and point OCR_LANG at them to read other languages.
+RUN apt-get update && apt-get install -y --no-install-recommends libmupdf-dev libfreetype6 libharfbuzz0b libopenjp2-7 libjbig2dec0 libjpeg62-turbo zlib1g tesseract-ocr tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -58,6 +61,11 @@ ARG FULL_SCAN_ON_BOOT=False
 ARG FOLDER_WATCHER_ACTIVE_ON_BOOT=True
 ARG DEBOUNCE_SECONDS=10
 ARG FULL_SCAN_INTERVAL_DAYS=7
+ARG OCR_ENABLED=True
+ARG OCR_MIN_TEXT_CHARS=20
+ARG OCR_DPI=300
+ARG OCR_LANG=eng
+ARG OCR_MAX_PAGES=9999
 
 ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION} \
@@ -95,7 +103,12 @@ ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     FULL_SCAN_ON_BOOT=${FULL_SCAN_ON_BOOT} \
     FOLDER_WATCHER_ACTIVE_ON_BOOT=${FOLDER_WATCHER_ACTIVE_ON_BOOT} \
     DEBOUNCE_SECONDS=${DEBOUNCE_SECONDS} \
-    FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS}
+    FULL_SCAN_INTERVAL_DAYS=${FULL_SCAN_INTERVAL_DAYS} \
+    OCR_ENABLED=${OCR_ENABLED} \
+    OCR_MIN_TEXT_CHARS=${OCR_MIN_TEXT_CHARS} \
+    OCR_DPI=${OCR_DPI} \
+    OCR_LANG=${OCR_LANG} \
+    OCR_MAX_PAGES=${OCR_MAX_PAGES}
 
 # Network access is not guaranteed at runtime: bake the embedding/reranker
 # models and the tiktoken BPE data into the image. Only the files the download

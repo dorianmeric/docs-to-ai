@@ -21,6 +21,7 @@ Supported extensions: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb
   - [Example questions for the LLM](#example-questions-for-the-llm)
   - [Configuration](#configuration)
     - [Chunking](#chunking)
+    - [OCR for scanned PDFs](#ocr-for-scanned-pdfs)
     - [Search](#search)
     - [Embedding model](#embedding-model)
     - [GPU acceleration](#gpu-acceleration)
@@ -59,13 +60,14 @@ Supported extensions: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.xlsam`, `.xlsb
 - Ask "how do I search my folder for X" once. The LLM calls the search tool for you.
 - Run a documents RAG setup fully offline. Embedding and re-ranking models run locally.
 - Filter search results by topic, date range, phrase, or regex.
+- Search scanned PDFs. Pages with no text layer are read with OCR automatically.
 - Keep the index fresh with a folder watcher.
 
 ## How search works
 
 ```
 Documents (PDF, Word, Excel, Markdown, PowerPoint, HTML, TXT, CSV)
-  → text extraction
+  → text extraction (scanned PDF pages go through OCR)
     → chunking (semantic by default, 1024 tokens)
       → embeddings (Qwen3-Embedding-0.6B, 1024-dim)
         → ChromaDB (cosine HNSW, topic tags on every chunk)
@@ -122,6 +124,21 @@ python mcp_server.py                 # start the MCP server
 Windows helper scripts sit in the repo root: `1.setup-python-env.ps1`, `2.scan-all-my-documents-in-python.ps1`, `3.run-mcp-server-in-python.ps1`.
 
 The first scan downloads the embedding model (about 1.2 GB) and the re-ranker (about 90 MB). Pre-download both with `python -m app.download_models`.
+
+Scanned PDFs need the Tesseract program. It is optional: without it every other file type still indexes.
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install tesseract-ocr tesseract-ocr-eng
+
+# Windows
+winget install UB-Mannheim.TesseractOCR
+
+# macOS
+brew install tesseract
+```
+
+Checking it worked: `python mcp_server.py --show-config` prints `OCR_STATUS=ready (...)` once Tesseract is found. The Docker image already includes Tesseract and the English pack.
 
 ### Scan options
 
@@ -375,6 +392,14 @@ Search and discovery:
 - `list_topics` lists topics.
 - `get_collection_stats` reports chunk counts, document counts, file types, and index details.
 
+Read one document in full:
+
+- `get_document_metadata` returns one document's metadata: path, topics, type, size, created and last-modified dates, chunk count, page numbers with chunks, OCR pages, and whether the file changed on disk since the last scan.
+- `get_document` returns one document's whole text, page by page, with the same metadata block. Use `page` to read a single page and `max_chars` to cap the response. The text is re-read from the source file, so it is complete even when the chunks are split; if the file is gone, the text is rebuilt from the indexed chunks and the response says so.
+- `get_document_file` returns the original file itself as a base64 string, with MIME type, byte count, and SHA-256, so the client can save or forward the real PDF, DOCX, or image. `max_bytes` defaults to 1 MB because base64 inflates a file by a third; raise it to fetch something bigger.
+
+All three take the same `document` argument: a filename, a full path, or part of either, as shown by `list_documents`. If a name matches more than one document, the tool answers with the candidates instead of guessing.
+
 Document management:
 
 - `scan_all_my_documents` re-indexes the document folder.
@@ -390,6 +415,12 @@ Find something in a PDF:
 - "Which file mentions the payment terms?"
 - "Find the exact phrase 'net 30 days' in my PDFs."
 - "Show me the page where invoice INV-2026-0042 appears."
+
+Read a whole document:
+
+- "Show me the full text of the UzKor K-sure policy."
+- "How big is the Commercial Terms Agreement, and when was it last changed?"
+- "Send me the actual Investment Agency Agreement file."
 
 Search my folder by topic:
 
@@ -450,6 +481,38 @@ Pick a chunking strategy for your corpus:
 - `fixed_size` slices at `CHUNK_SIZE` and ignores structure.
 
 Token counts come from tiktoken, not from the embedding model tokenizer. Counts differ by a small margin.
+
+### OCR for scanned PDFs
+
+A scanned PDF stores a picture of each page, not text. Text extraction finds nothing, and the page would be indexed empty. When a page's text layer holds fewer than `OCR_MIN_TEXT_CHARS` characters, the page is rendered to an image and read by Tesseract, and the recognised text is indexed like any other text. Each chunk records that it came from OCR, so results and `get_document` mark those pages `(OCR)`.
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| OCR on | `OCR_ENABLED` | `True` | Read pages that have no usable text layer |
+| Scan threshold | `OCR_MIN_TEXT_CHARS` | `20` | A page below this many characters is treated as a scan |
+| Render resolution | `OCR_DPI` | `300` | DPI the page is rasterised at before OCR, held between 150 and 600 |
+| Language | `OCR_LANG` | `eng` | Tesseract language pack(s); combine with `+`, for example `deu+eng` |
+| Pages per document | `OCR_MAX_PAGES` | `9999` | Ceiling on scanned pages read per document; `0` turns OCR off |
+
+How it behaves:
+
+- Only pages that need it go through OCR. A PDF with a text layer costs nothing extra, and a mixed PDF reads its scanned pages only.
+- Blank pages are skipped. A page with no image and no drawing has nothing to read.
+- Every scanned page is read by default: `OCR_MAX_PAGES=9999` is no practical limit. The setting stays as a ceiling for pathological files; set it lower to bound the time a single huge scan can take. When a document hits the ceiling the log says how many pages were left. `OCR_MAX_PAGES=0` turns OCR off.
+- OCR runs once per document. The extracted text is cached in `cache/doc_cache`, so later scans and `get_document` reuse it.
+- Turning OCR on, or changing `OCR_DPI`, `OCR_LANG`, `OCR_MIN_TEXT_CHARS`, or `OCR_MAX_PAGES`, makes the cached text of PDFs stale. The next scan re-reads those PDFs, so previously empty scans fill in. Other file types keep their cached text.
+- OCR is CPU work: roughly 0.5-2 seconds per page at 300 DPI, so a 500-page scan takes several minutes once. It happens at index time, not at search time, and the result is cached.
+- Without Tesseract the server still runs. It logs one warning, and scanned pages stay empty.
+
+Language packs in Docker: the image installs `tesseract-ocr` and `tesseract-ocr-eng`. For another language, add the pack to the `apt-get` line in the [Dockerfile](Dockerfile) (`tesseract-ocr-deu`) and set `OCR_LANG=deu`.
+
+The log reports the outcome per document:
+
+```
+[OCR] OCR is available: Tesseract 5.5.0, OCR_LANG=eng
+[OCR] OCR read 12 of 20 scanned page(s) in contract.pdf
+[OCR] contract.pdf: OCR stopped after OCR_MAX_PAGES=100 page(s), so 8 more scanned page(s) stay empty.
+```
 
 ### Search
 
@@ -624,6 +687,9 @@ USE_RERANKER=True
 DEFAULT_SEARCH_RESULTS=8
 USE_GPU_ACCELERATION_IF_AVAILABLE=True
 GPU_DEVICE_INDEX=0
+OCR_ENABLED=True                  # read scanned PDFs with Tesseract
+OCR_MAX_PAGES=9999                # ceiling per document; 0 turns OCR off
+OCR_LANG=eng                      # deu+eng for German and English
 ```
 
 ## Retrieval pipeline
@@ -684,7 +750,9 @@ Two files sit in `logs/` (`/app/logs` in Docker, bind-mounted to `./logs` on the
 | File | Content |
 |---|---|
 | `logs/server.log` | Every action of the server: startup, model loading, watcher events, scans, tool calls, searches, errors |
-| `logs/detail.jsonl` | One JSON object per line for the events needed to debug retrieval: `server_start`, `tool_call`, `search`, `scan_document`, `scan_summary`, `incremental_change`, `watch_batch` |
+| `logs/detail.jsonl` | One JSON object per line for the events needed to debug retrieval: `server_start`, `tool_call`, `search`, `scan_document`, `scan_summary`, `incremental_change`, `watch_batch`, `ocr_document` |
+
+`ocr_document` records what OCR did with one PDF: `total_pages`, the `ocr_pages` list with per-page characters and milliseconds, the pages still without text, the pages skipped by `OCR_MAX_PAGES`, and the pages skipped as blank. Find the slowest scans with `jq 'select(.event=="ocr_document") | {file, pages: (.ocr_pages|length), ms: ([.ocr_pages[].ms]|add)}' logs/detail.jsonl`.
 
 Both files rotate by size. A full file is renamed to `.1`, `.2`, and so on. The oldest file beyond `LOG_BACKUP_COUNT` is deleted.
 
@@ -838,7 +906,11 @@ The server explains each failure in three parts: what happened, the likely cause
 | `The index is empty, so '<query>' could not match anything.` | Nothing is indexed yet, or the last scan failed. | Run the `scan_all_my_documents` tool, or `python -m app.scan_all_my_documents --doc-dir ./my-docs`. |
 | `No results found for query: '<query>'.` | The words are absent from the chunks, or a filter removed every match. | Try other words. Drop the topic, date, phrase, or regex filter. Call `list_topics` to check topics. |
 | `The PDF '<file>' could not be read.` | The PDF is encrypted, truncated, or not a real PDF. | Remove the password, repair the file, or re-print it to PDF. Then scan again. |
-| `No text could be extracted from '<file>'.` | The page holds an image and no text layer. | Run OCR on the file, save a searchable PDF, then scan again. |
+| `No text could be extracted from '<file>'.` | The file is empty, or a scanned PDF whose pages OCR could not read. | For a PDF, check `OCR_ENABLED=True`, `OCR_MAX_PAGES` above zero, and `OCR_STATUS=ready` in `--show-config`. See [OCR for scanned PDFs](#ocr-for-scanned-pdfs). |
+| `OCR is enabled but unavailable: The Tesseract program was not found` | The Python packages are installed but the Tesseract program is missing, so scans stay empty. | Install it: Debian `apt-get install tesseract-ocr tesseract-ocr-eng`, Windows `winget install UB-Mannheim.TesseractOCR`, macOS `brew install tesseract`. The Docker image already has it. |
+| `OCR is enabled but unavailable: ... has no language pack for <lang>` | `OCR_LANG` names a pack that is not installed. | Install the pack (`apt-get install tesseract-ocr-deu`) or set `OCR_LANG` to an installed one. `--show-config` lists them. |
+| `OCR stopped after OCR_MAX_PAGES=<n> page(s), so <m> more scanned page(s) stay empty` | `OCR_MAX_PAGES` was lowered below the page count of this document. | Raise `OCR_MAX_PAGES`, then re-scan. |
+| `OCR found no text in <n> page(s)` | The scan is too faint, skewed, or blank. | Re-scan at a higher quality, raise `OCR_DPI` to 400-600, or install the right language pack. |
 | `A Python package needed for this step is missing: <name>.` | The environment does not match `pyproject.toml`. | Run `uv sync`, then restart the server. |
 | `The embedding model '<model>' could not be loaded.` | Model not downloaded, wrong `EMBEDDING_MODEL`, or the device rejected the model. | Run `python -m app.download_models` with network access. Check the model name. Check `torch.cuda.is_available()`. |
 | `A network request failed.` | Hugging Face or PyPI is unreachable, or models were never downloaded. | Connect to the internet and run `python -m app.download_models` once. For offline machines, copy a warm `~/.cache/huggingface` from another machine. |
@@ -881,7 +953,9 @@ Yes. Embedding and re-ranking run on your machine. Downloads happen once, at ins
 
 ### Can I find text inside a scanned PDF?
 
-No OCR. PDF text extraction reads the text layer stored in the file. A scanned PDF without a text layer yields nothing. Run OCR on the file, save a searchable PDF, then re-index the folder.
+Yes. Pages with no text layer are rendered and read with OCR (Tesseract) at index time, so a scanned PDF becomes searchable like any other. This needs `OCR_ENABLED=True` (the default) and the Tesseract program. The Docker image includes it; a local install needs one `apt-get`/`winget`/`brew` command. See [OCR for scanned PDFs](#ocr-for-scanned-pdfs).
+
+Every scanned page is read. `OCR_MAX_PAGES` is only a ceiling for huge files (9999 by default, so no practical limit); `0` turns OCR off.
 
 ### How do I find something in a PDF when I do not know the page?
 
@@ -910,6 +984,8 @@ Start the folder watcher. Changed files are re-indexed after `DEBOUNCE_SECONDS`.
 ### Why does a search return chunks instead of whole files?
 
 Chunks keep queries precise and keep contexts small. Each chunk carries its file path, page number, and topic. The LLM reads the chunk and cites the file.
+
+When the whole document is needed, `get_document` returns its full text and `get_document_file` returns the original file as base64.
 
 ## License
 

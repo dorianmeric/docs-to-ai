@@ -6,12 +6,18 @@ via the MCP protocol.
 """
 
 from .logging_utils import log_error, log_info, log_warn
+import base64
 import contextvars
+import hashlib
+import mimetypes
+import os
 import threading
 import time
 import sys
+from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.errors import explain, format_message, friendly_errors
 from app.log_config import log_detail, truncate
@@ -21,6 +27,7 @@ from app.config import (
     DEFAULT_SEARCH_RESULTS,
     MAX_SEARCH_RESULTS,
     CHROMA_SPACE,
+    CHROMA_COLLECTION_NAME,
     LOG_CHUNK_TEXT_CHARS,
     SLOW_QUERY_MS,
     TOPIC_SEPARATOR,
@@ -296,6 +303,10 @@ def search_documents(
 
         response_parts.append(f"\nContent:\n{result['text']}")
 
+    response_parts.append(
+        "\nTip: call 'get_document' with one of these file names to read that document in full, "
+        "or 'get_document_file' to get the original file."
+    )
     response = "\n".join(response_parts)
     trace['format_ms'] = round((time.perf_counter() - format_started) * 1000, 2)
     log_search("ok", results)
@@ -364,6 +375,357 @@ def list_documents(topic: Optional[str] = None) -> str:
             response_parts.append(f"    Topics: {topics_display}")
 
     return "\n".join(response_parts)
+
+
+# Base64 inflates a file by a third and every MCP client caps a tool response, so
+# the file tool starts well below the client limits and the caller can raise it.
+DEFAULT_MAX_FILE_BYTES = 1_000_000
+
+
+def _human_size(size_bytes: int) -> str:
+    if size_bytes > 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    if size_bytes > 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes} bytes"
+
+
+def _iso_time(timestamp: float) -> str:
+    if not timestamp:
+        return "unknown"
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+
+
+def _normalise(text: str) -> str:
+    return str(text).replace('\\', '/').strip().lower()
+
+
+def _match_document(document: str, documents: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Find one indexed document by path, filename, or a part of either.
+
+    Returns ``(match, candidates)``. ``match`` is None when the request is
+    ambiguous; ``candidates`` then holds the options to choose from.
+    """
+    needle = _normalise(document)
+    if not needle:
+        return None, []
+
+    def names(doc: Dict[str, Any]) -> List[str]:
+        filename = str(doc.get('filename', ''))
+        path = _normalise(doc.get('filepath', ''))
+        stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+        return [_normalise(filename), _normalise(stem), path]
+
+    # exact path, then exact filename, then filename without extension
+    for level in range(3):
+        hits = [doc for doc in documents if names(doc)[level] == needle]
+        if len(hits) == 1:
+            return hits[0], []
+        if len(hits) > 1:
+            return None, hits
+
+    # path suffix ("legal docs/contract.docx"), then substring of filename or path
+    suffix_hits = [doc for doc in documents if _normalise(doc.get('filepath', '')).endswith(needle)]
+    if len(suffix_hits) == 1:
+        return suffix_hits[0], []
+    if len(suffix_hits) > 1:
+        return None, suffix_hits
+
+    partial = [doc for doc in documents
+               if any(needle in name for name in (names(doc)[0], names(doc)[2]))]
+    if len(partial) == 1:
+        return partial[0], []
+    return None, partial
+
+
+def _document_chunks(vector_store, filepath: str) -> List[Dict[str, Any]]:
+    """All indexed chunks of one document, ordered by page and chunk index."""
+    try:
+        result = vector_store.collection.get(
+            where={"filepath": filepath}, include=["documents", "metadatas"]
+        )
+    except Exception:
+        return []
+
+    chunks = []
+    for index, chunk_id in enumerate(result.get('ids') or []):
+        metadata = (result.get('metadatas') or [])[index] or {}
+        chunks.append({
+            'id': chunk_id,
+            'text': (result.get('documents') or [])[index] or '',
+            'page': metadata.get('page', 1),
+            'chunk_index': metadata.get('chunk_index', 0),
+            'is_ocr': bool(metadata.get('is_ocr')),
+            'metadata': metadata,
+        })
+    chunks.sort(key=lambda item: (item['page'], item['chunk_index']))
+    return chunks
+
+
+def _document_pages(vector_store, doc: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+    """Full text of a document as pages, plus where the text came from."""
+    filepath = doc.get('filepath', '')
+    path = Path(filepath)
+
+    # Why the text below does not come from the file on disk
+    fallback_reason = 'source file missing'
+    if filepath and path.is_file():
+        from app.document_processor import DocumentProcessor
+        try:
+            pages = DocumentProcessor().extract_text_from_document(str(path), DOCS_DIR)
+            if pages:
+                return pages, 'source file'
+            fallback_reason = "source file produced no text"
+        except Exception as exc:
+            # A broken or unsupported file must not hide the text that is indexed
+            log_warn(f"Could not re-read {path.name} for get_document: {exc}", component="MCP")
+            fallback_reason = f"source file could not be read ({type(exc).__name__})"
+
+    # Source file gone or unreadable: rebuild the text from the stored chunks
+    chunks = _document_chunks(vector_store, filepath)
+    pages_map: Dict[int, List[str]] = {}
+    for chunk in chunks:
+        pages_map.setdefault(chunk['page'], []).append(chunk['text'])
+    ocr_pages = {chunk['page'] for chunk in chunks if chunk['is_ocr']}
+    pages = [
+        {
+            'page': page,
+            'text': "\n".join(texts),
+            'total_pages': len(pages_map),
+            'ocr': page in ocr_pages,
+        }
+        for page, texts in sorted(pages_map.items())
+    ]
+    return pages, f"indexed chunks ({fallback_reason})"
+
+
+def _document_overview(vector_store, doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Metadata block shared by the document tools."""
+    filepath = doc.get('filepath', '')
+    path = Path(filepath)
+    chunks = _document_chunks(vector_store, filepath)
+    pages = sorted({chunk['page'] for chunk in chunks})
+    on_disk = path.is_file()
+    stat = path.stat() if on_disk else None
+    size_now = stat.st_size if stat else None
+    modified_now = stat.st_mtime if stat else None
+    created_now = stat.st_ctime if stat else None
+    indexed_size = doc.get('file_size')
+    indexed_modified = doc.get('last_modified')
+
+    if not on_disk:
+        state = 'missing on disk'
+    elif size_now == indexed_size and modified_now == indexed_modified:
+        state = 'unchanged since the last scan'
+    else:
+        state = 'changed on disk since the last scan, re-scan to refresh the chunks'
+
+    return {
+        'filename': doc.get('filename'),
+        'filepath': filepath,
+        'topics': doc.get('topics', []),
+        'filetype': doc.get('filetype'),
+        'size_bytes': indexed_size,
+        'size_human': _human_size(indexed_size or 0),
+        'last_modified': _iso_time(indexed_modified or 0),
+        'last_modified_epoch': indexed_modified,
+        'current_size_bytes': size_now,
+        'current_last_modified': _iso_time(modified_now or 0),
+        'created': _iso_time(created_now or 0),
+        # st_ctime is the creation time on Windows and the inode change time elsewhere
+        'created_kind': 'created' if os.name == 'nt' else 'inode changed',
+        'total_pages': next((chunk['metadata'].get('total_pages') for chunk in chunks
+                             if chunk['metadata'].get('total_pages')), None),
+        'on_disk': on_disk,
+        'index_state': state,
+        'chunk_count': len(chunks),
+        'pages_with_chunks': pages,
+        'ocr_pages': sorted({chunk['page'] for chunk in chunks if chunk['metadata'].get('is_ocr')}),
+        'collection': CHROMA_COLLECTION_NAME,
+    }
+
+
+def _resolve_document(vector_store, document: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Find the one document the caller means, or the text that explains why not."""
+    documents = vector_store.list_documents()
+    if not documents:
+        return None, format_message(
+            "No documents are indexed yet.",
+            cause="Nothing has been scanned into the vector store.",
+            fix="Run the 'scan_all_my_documents' tool first.",
+        )
+
+    match, candidates = _match_document(document, documents)
+    if match is not None:
+        return match, None
+
+    if candidates:
+        lines = [f"More than one document matches '{document}'. "
+                 "Call the tool again with the full name or path:"]
+        for item in candidates[:20]:
+            lines.append(f"- {item['filename']}  ({TOPIC_SEPARATOR.join(item.get('topics') or [])})")
+            lines.append(f"  {item['filepath']}")
+        return None, "\n".join(lines)
+
+    return None, format_message(
+        f"No indexed document matches '{document}'.",
+        cause="The name is different, or the document was never scanned.",
+        fix="Call 'list_documents' and copy a filename from there, then run this tool again.",
+    )
+
+
+def _page_list(pages: List[int]) -> str:
+    """'1-61' or '1-3, 7, 9-12' for a sorted page list."""
+    if not pages:
+        return 'none'
+    parts = []
+    start = previous = pages[0]
+    for page in pages[1:]:
+        if page == previous + 1:
+            previous = page
+            continue
+        parts.append(f"{start}-{previous}" if start != previous else f"{start}")
+        start = previous = page
+    parts.append(f"{start}-{previous}" if start != previous else f"{start}")
+    return ", ".join(parts)
+
+
+def _overview_text(overview: Dict[str, Any]) -> List[str]:
+    lines = [f"Document: {overview['filename']}"]
+    lines.append(f"Path: {overview['filepath']}")
+    lines.append(f"Topics: {TOPIC_SEPARATOR.join(overview['topics']) if overview['topics'] else 'uncategorized'}")
+    lines.append(f"Type: {overview['filetype']}")
+    if overview['size_human'] == f"{overview['size_bytes']} bytes":
+        lines.append(f"Size: {overview['size_bytes']} bytes")
+    else:
+        lines.append(f"Size: {overview['size_human']} ({overview['size_bytes']} bytes)")
+    lines.append(f"Last modified: {overview['last_modified']} (epoch {overview['last_modified_epoch']})")
+    if overview['total_pages'] and overview['total_pages'] > 0:
+        lines.append(f"Pages in the document: {overview['total_pages']}")
+    lines.append(f"Chunks in index: {overview['chunk_count']} on page(s) "
+                 f"{_page_list(overview['pages_with_chunks'])}")
+    if overview['ocr_pages']:
+        lines.append(f"OCR pages: {_page_list(overview['ocr_pages'])} (text came from OCR)")
+    lines.append(f"Source state: {overview['index_state']}")
+    if overview['on_disk']:
+        lines.append(f"File on disk now: {_human_size(overview['current_size_bytes'] or 0)}, "
+                     f"modified {overview['current_last_modified']}, "
+                     f"{overview['created_kind']} {overview['created']}")
+    lines.append(f"Collection: {overview['collection']}")
+    return lines
+
+
+@friendly_errors
+@logged_tool
+def get_document_metadata(document: str) -> str:
+    """Return the metadata of one indexed document: dates, size, topics, chunk count.
+
+    Args:
+        document: Filename, path, or part of either, as returned by list_documents
+    """
+    vector_store = VectorStore()
+    match, problem = _resolve_document(vector_store, document)
+    if problem:
+        return problem
+
+    return "\n".join(_overview_text(_document_overview(vector_store, match)))
+
+
+@friendly_errors
+@logged_tool
+def get_document(document: str, page: Optional[int] = None, max_chars: int = 0) -> str:
+    """Return one document in full, with its metadata.
+
+    Args:
+        document: Filename, path, or part of either, as returned by list_documents
+        page: Optional: return only this page (1-based)
+        max_chars: Optional: cut the text after this many characters (0 = no limit)
+    """
+    vector_store = VectorStore()
+    match, problem = _resolve_document(vector_store, document)
+    if problem:
+        return problem
+
+    overview = _document_overview(vector_store, match)
+    pages, source = _document_pages(vector_store, match)
+
+    if page is not None:
+        pages = [item for item in pages if item['page'] == page]
+        if not pages:
+            return format_message(
+                f"Page {page} does not exist in '{match['filename']}'.",
+                cause="The page number is outside the document.",
+                fix=f"Valid pages: {_page_list(overview['pages_with_chunks'])}. Call the tool again "
+                    "without the page argument to get everything.",
+            )
+
+    body_parts = []
+    for item in pages:
+        # The extractor sets 'ocr'; pages read from the document cache carry it
+        # on their metadata instead
+        is_ocr = item.get('ocr') or (item.get('metadata') or {}).get('is_ocr')
+        marker = " (OCR)" if is_ocr else ""
+        body_parts.append(f"--- Page {item['page']}{marker} ---\n{item['text']}")
+    body = "\n\n".join(body_parts)
+
+    total_chars = len(body)
+    if max_chars and total_chars > max_chars:
+        body = body[:max_chars] + f"\n...[{total_chars - max_chars} chars cut, call again with max_chars=0 for all]"
+
+    lines = _overview_text(overview)
+    lines.append(f"Text source: {source}")
+    lines.append(f"Characters returned: {len(body)} of {total_chars}")
+    lines.append("")
+    lines.append("--- Text ---")
+    lines.append(body)
+    return "\n".join(lines)
+
+
+@friendly_errors
+@logged_tool
+def get_document_file(document: str, max_bytes: int = DEFAULT_MAX_FILE_BYTES) -> str:
+    """Return the original document file as base64, with its metadata.
+
+    Args:
+        document: Filename, path, or part of either, as returned by list_documents
+        max_bytes: Refuse files larger than this (default 1 MB, raise it to get a bigger file)
+    """
+    vector_store = VectorStore()
+    match, problem = _resolve_document(vector_store, document)
+    if problem:
+        return problem
+
+    path = Path(match.get('filepath', ''))
+    if not path.is_file():
+        return format_message(
+            f"The file for '{match['filename']}' is not on disk any more.",
+            cause="The document was moved or deleted after it was indexed.",
+            fix="Restore the file next to the mounted documents folder and re-scan, or use 'get_document' "
+                "to read the text that is still indexed.",
+        )
+
+    size = path.stat().st_size
+    if size > max_bytes:
+        return format_message(
+            f"'{match['filename']}' is {_human_size(size)}, above the {_human_size(max_bytes)} limit.",
+            cause="Large binary files are not returned in one tool response by default.",
+            fix=f"Call the tool again with max_bytes={size} to get the whole file, or use 'get_document' "
+                "to read the extracted text instead.",
+        )
+
+    data = path.read_bytes()
+    mime, _ = mimetypes.guess_type(path.name)
+    overview = _document_overview(vector_store, match)
+
+    lines = _overview_text(overview)
+    lines.append(f"MIME type: {mime or 'application/octet-stream'}")
+    lines.append(f"Bytes: {size}")
+    lines.append(f"SHA-256: {hashlib.sha256(data).hexdigest()}")
+    lines.append(f"Encoding: base64 (about {int(size * 4 / 3)} characters)")
+    lines.append("")
+    lines.append("--- Base64 ---")
+    lines.append(base64.b64encode(data).decode('ascii'))
+    return "\n".join(lines)
 
 
 @friendly_errors
