@@ -249,6 +249,7 @@ services:
       - ./cache/chromadb:/app/cache/chromadb  # vector store
       - ./cache/doc_cache:/app/cache/doc_cache  # extracted text
       - ./my-docs:/app/my-docs:ro             # your documents, read-only
+      - ./logs:/app/logs                        # server.log and detail.jsonl
 
     # stdio MCP needs stdin/stdout
     stdin_open: true
@@ -258,6 +259,7 @@ services:
       - MCP_TRANSPORT=http                     # http://localhost:38777/mcp
       - MCP_HOST=0.0.0.0
       - MCP_PORT=38777
+      - LOG_DIR=/app/logs                      # server.log and detail.jsonl
 
     ports:
       - "${MCP_PORT:-38777}:${MCP_PORT:-38777}"
@@ -318,6 +320,7 @@ Volumes:
 - `./cache/chromadb:/app/cache/chromadb` holds the vector store.
 - `./cache/doc_cache:/app/cache/doc_cache` holds extracted text.
 - `./my-docs:/app/my-docs:ro` holds your documents.
+- `./logs:/app/logs` holds `server.log` and `detail.jsonl`. Without it the logs stay inside the container and disappear when it is recreated.
 
 Ports:
 
@@ -860,7 +863,7 @@ Both files rotate by size. A full file is renamed to `.1`, `.2`, and so on. The 
 | Chunk text | `LOG_CHUNK_TEXT_CHARS` | `2000` | Chunk text stored per result, `0` stores none |
 | Slow query | `SLOW_QUERY_MS` | `20000` | A search slower than this logs a `WARN` with the step breakdown |
 
-Docker writes the files to the host because `docker-compose.yml` mounts `./logs` and sets `LOG_DIR=/app/logs`:
+Docker writes the files to the host because `docker-compose.yml` mounts `./logs` and sets `LOG_DIR=/app/logs`. The template above does the same; without that mount the logs land in the container's own filesystem and vanish on the next `docker compose down` or image update:
 
 ```yaml
     volumes:
