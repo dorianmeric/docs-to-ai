@@ -717,7 +717,7 @@ Every query also logs one line to `server.log` with the time of each step and th
 ```
 2026-11-27 22:25:43 INFO    [MCP] Search 'PD-ROT-77' -> ok, 1 chunk(s) in 111 ms (prep 0 | encode 80 | chroma 3 | bm25_build 1 | bm25 0 | fuse 0 | dense 83 | filters 0 | rerank 26 | format 0)
 2026-11-27 22:26:07 INFO    [MCP] Search 'PD-ROT-77 2' -> ok, 1 chunk(s) in 109 ms (...) [3 tool calls in flight]
-2026-11-27 22:31:10 WARN  ⚠️ [MCP] Search 'annual report' -> ok, 5 chunk(s) in 6200 ms (...) - over SLOW_QUERY_MS
+2026-11-27 22:31:10 WARN  ⚠️ [MCP] Search 'annual report' -> ok, 5 chunk(s) in 24500 ms (...) - over SLOW_QUERY_MS
 ```
 
 | Field | Meaning |

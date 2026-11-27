@@ -306,6 +306,15 @@ async def main():
             print("  EMBEDDING_QUERY_PROMPT  Query instruction prefix (default: model's built-in 'query' prompt)")
             print("  USE_GPU_ACCELERATION_IF_AVAILABLE  Use CUDA/MPS for the embedding model and re-ranker, else CPU (default: True)")
             print("  GPU_DEVICE_INDEX        0-based index of the CUDA GPU to use (default: 0)")
+            print("\nLogging (defaults shown):")
+            print("  LOG_DIR                 Folder for server.log and detail.jsonl (default: ./logs, /app/logs in Docker)")
+            print("  LOG_LEVEL               DEBUG | INFO | WARNING | ERROR (default: INFO)")
+            print("  LOG_CONSOLE             Also print log lines to stderr (default: True)")
+            print("  LOG_MAX_BYTES           Rotate a log file after this size in bytes (default: 10485760)")
+            print("  LOG_BACKUP_COUNT        Rotated files kept per log (default: 5)")
+            print("  LOG_DETAIL_ENABLED      Write detail.jsonl with queries, candidates and chunks (default: True)")
+            print("  LOG_CHUNK_TEXT_CHARS    Chunk text stored per result in detail.jsonl (default: 2000)")
+            print("  SLOW_QUERY_MS           Warn when one search takes longer than this in ms (default: 20000)")
             print("\nStorage / topics (defaults shown):")
             print("  CHROMA_SPACE            HNSW distance space: cosine | l2 | ip (default: cosine)")
             print("  HNSW_EF_SEARCH          HNSW query-time candidate list size (default: 200)")
@@ -333,6 +342,8 @@ async def main():
                 RERANKER_TOP_N, USE_BM25, BM25_WEIGHT, BM25_K1, BM25_B, RRF_K,
                 USE_FOLDER_AS_TOPIC, DEFAULT_TOPIC,
                 CHROMA_COLLECTION_NAME, CHROMA_SPACE, HNSW_EF_SEARCH, HNSW_EF_CONSTRUCTION,
+                LOG_DIR, LOG_LEVEL, LOG_MAX_BYTES, LOG_BACKUP_COUNT, LOG_DETAIL_ENABLED,
+                LOG_CHUNK_TEXT_CHARS, SLOW_QUERY_MS,
                 FULL_SCAN_ON_BOOT, FOLDER_WATCHER_ACTIVE_ON_BOOT,
                 DEBOUNCE_SECONDS, FULL_SCAN_INTERVAL_DAYS, DOCS_DIR
             )
@@ -375,6 +386,13 @@ async def main():
             print(f"  CHROMA_COLLECTION_NAME={CHROMA_COLLECTION_NAME}")
             print(f"  CHROMA_SPACE={CHROMA_SPACE}")
             print(f"  HNSW_EF_SEARCH={HNSW_EF_SEARCH}")
+            print(f"  LOG_DIR={LOG_DIR}")
+            print(f"  LOG_LEVEL={LOG_LEVEL}")
+            print(f"  LOG_MAX_BYTES={LOG_MAX_BYTES}")
+            print(f"  LOG_BACKUP_COUNT={LOG_BACKUP_COUNT}")
+            print(f"  LOG_DETAIL_ENABLED={LOG_DETAIL_ENABLED}")
+            print(f"  LOG_CHUNK_TEXT_CHARS={LOG_CHUNK_TEXT_CHARS}")
+            print(f"  SLOW_QUERY_MS={SLOW_QUERY_MS}")
             print(f"  HNSW_EF_CONSTRUCTION={HNSW_EF_CONSTRUCTION}")
             print(f"  DOCS_DIR={DOCS_DIR}")
             print(f"  FULL_SCAN_ON_BOOT={FULL_SCAN_ON_BOOT}")
