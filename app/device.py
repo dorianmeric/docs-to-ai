@@ -68,7 +68,8 @@ def _log_gpu_unavailable_hint() -> None:
             "  COMPOSE_FILE=docker-compose.yml;docker-compose.gpu.yml\n"
             "A plain 'docker run' needs '--gpus all'. Linux hosts also need the NVIDIA Container "
             "Toolkit. Docker Desktop needs the WSL2 backend and the NVIDIA driver on the host.\n"
-            "Verify with: docker run --rm --gpus all <image> nvidia-smi",
+            "Verify with 'docker compose exec docs-to-ai nvidia-smi', or for a plain 'docker run' add "
+            "'--entrypoint nvidia-smi' (the image entrypoint is the MCP server itself).", 
             level="warn",
         )
         return

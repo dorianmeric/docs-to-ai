@@ -122,19 +122,29 @@ services:
       - "${MCP_PORT:-38777}:${MCP_PORT:-38777}"
 
     restart: unless-stopped
+
+    ## Uncomment to enable GPU acceleration on an Nvidia GPU.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all          # or device_ids: ['0'] to pin one GPU
+    #           capabilities: [gpu]
 ````
 
 The image is published on Docker Hub as [dmeric/docs-to-ai](https://hub.docker.com/r/dmeric/docs-to-ai). The repository ships its own [docker-compose.yml](docker-compose.yml), which is the same service plus a `build:` block, all build args, and a comment on every setting. Use that file when you want to build the image yourself as `mcp/docs-to-ai`, for example to change build args or run unreleased code after `docker compose build`.
 
 ### 3. Start the container
 
+
 ```bash
 docker compose up -d
-docker compose logs | grep -A4 "Listening on"                                        # macOS, Linux, WSL
-docker compose logs | Select-String "Listening on" -Context 0,4                      # Windows PowerShell
 ```
 
-The container keeps running and serves MCP at `http://localhost:38777/mcp`. The log line names every address a client can use:
+Note on GPU usage:he GPU host needs an NVIDIA driver, R580 or newer (the normal GeForce driver on Windows): the image ships a CUDA 13 PyTorch build. On Linux it also needs the NVIDIA Container Toolkit (`nvidia-container-toolkit`). Docker Desktop needs the WSL2 based engine, which is the default. No CUDA toolkit install is needed, because the image already ships the CUDA-enabled PyTorch wheel. [GPU inside Docker](#gpu-inside-docker) shows the reservation file in full, the log check, and the `.env` alternative.
+
+Either way, the container keeps running and serves MCP at `http://localhost:38777/mcp`. The log line names every address a client can use:
 
 ```
 2026-11-27 13:56:18 SUCCESS ✅ [MCP Server] Listening on 0.0.0.0:38777/mcp
@@ -268,11 +278,13 @@ The vector store is a cache built from your documents, so a recreate never touch
 
 A container sees only the GPUs that Docker passes to it. Without a device reservation the log says `No GPU is visible inside this container`, even when the host has a GPU.
 
-Docker cannot make the reservation optional in one file, because a host without a GPU fails `docker compose up`. Use the override file on GPU hosts instead:
+A host without a GPU fails `docker compose up` as soon as the reservation is active, so [docker-compose.yml](docker-compose.yml) ships the block commented out under `# Uncomment to enable GPU acceleration on an Nvidia GPU.` Uncomment it on a GPU host, or keep the base file untouched and merge the override file instead:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
+
+If you followed [step 3](#3-start-the-container) with the pull-image compose file, the same block is saved there as `docker-compose.gpu.yaml`, so use that file name instead.
 
 To keep plain `docker compose up -d` working, add one line to `.env`. The separator is `;` on Windows and `:` on Linux and macOS.
 
@@ -295,20 +307,21 @@ deploy:
 
 Requirements:
 
-- An NVIDIA driver on the host. On Windows the normal GeForce driver is enough.
+- An NVIDIA driver on the host, **R580 or newer**, because the image ships a CUDA 13 PyTorch build. On Windows that is the normal GeForce driver.
 - On Linux, the NVIDIA Container Toolkit (`nvidia-container-toolkit`).
-- On Docker Desktop, the WSL2 based engine, which is the default. Do not switch to Hyper-V.
+- On Docker Desktop for Windows, the WSL2 based engine, which is the default. Do not switch to Hyper-V.
 
-Check that the container sees the GPU:
+The CUDA toolkit is not required: the image already contains the CUDA-enabled PyTorch wheel and its CUDA libraries, so no rebuild is needed either. The container's PyTorch reports the CUDA version it was built for:
 
 ```bash
-docker run --rm --gpus all mcp/docs-to-ai nvidia-smi
+docker compose exec docs-to-ai uv run --no-sync python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
+docker compose exec docs-to-ai nvidia-smi          # driver and GPU list, once the container runs
 docker compose logs | grep "Compute device"
 ```
 
-Expected log line: `Compute device: cuda:0 (NVIDIA GeForce RTX 5090, 32 GB VRAM)`. The image installs the CUDA-enabled PyTorch wheel on Linux, so no rebuild is needed.
+Expected log line: `Compute device: cuda:0 (NVIDIA GeForce RTX 5090, 32 GB VRAM)`.
 
-A plain `docker run` needs `--gpus all`; add it yourself, otherwise the container starts on CPU. [GPU acceleration](#gpu-acceleration) covers the settings and the measured speed-up.
+A plain `docker run` needs `--gpus all`, and because the entrypoint is the MCP server itself, any other command has to go through `--entrypoint`: `docker run --rm --gpus all --entrypoint nvidia-smi mcp/docs-to-ai`. Without `--gpus all` the container starts on CPU. [GPU acceleration](#gpu-acceleration) covers the settings and the measured speed-up.
 
 ## Connect an MCP client
 

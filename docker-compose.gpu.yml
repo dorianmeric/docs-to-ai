@@ -11,13 +11,14 @@
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml      (Linux/macOS)
 #
 # Requirements:
-#   - NVIDIA driver on the host (Windows: the normal GeForce/Quadro driver).
+#   - NVIDIA driver on the host, R580 or newer (the image ships a CUDA 13 PyTorch
+#     build). On Windows that is the normal GeForce/Quadro driver.
 #   - Linux hosts: the NVIDIA Container Toolkit (nvidia-container-toolkit).
-#   - Docker Desktop on Windows/macOS: the WSL2 based engine, which is the default.
+#   - Docker Desktop on Windows: the WSL2 based engine, which is the default.
 #
-# Verify the container can see the GPU:
+# Verify the container can see the GPU, with the container already running:
 #
-#   docker run --rm --gpus all mcp/docs-to-ai nvidia-smi
+#   docker compose exec docs-to-ai nvidia-smi
 #   docker logs docs-to-ai | grep "Compute device"
 #
 # Expect: Compute device: cuda:0 (NVIDIA GeForce RTX 5090, 32 GB VRAM)
